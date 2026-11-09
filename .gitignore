@@ -1,0 +1,8 @@
+__pycache__/
+.claude/
+# личные заметки и данные — не выкладывать в открытый репозиторий
+CLAUDE.md
+*.json.local
+data/
+# локальные тесты
+docs/test-mock.html
