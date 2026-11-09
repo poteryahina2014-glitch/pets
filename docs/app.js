@@ -200,16 +200,16 @@ function renderToday(){
   const doneToday=[];const seen=new Set();
   for(const l of [...S.logs].sort((a,b)=>b.id-a.id))if(l.status==="done"&&l.done_on===t0&&ids.has(l.task_id)&&!seen.has(l.task_id)){seen.add(l.task_id);const t=S.tasks.find(x=>x.id===l.task_id);if(t&&!now.includes(t))doneToday.push(t)}
   const care=petTasks(true).filter(t=>t.repeat_unit&&!t.done_on&&!own.has(t.id)).sort((a,b)=>(a.due_date||"").localeCompare(b.due_date||""));
-  let h="";
+  let h="",r="";
   if(late.length)h+=`<div class="alarm"><div class="ah">⚠ Пора! Не сделано вовремя: ${late.length}</div>${late.map(t=>taskRow(t,own)).join("")}</div>`;
   else if(!now.length)h+=`<div class="allgood">Всё сделано — ${esc(P().name)} доволен 🐾</div>`;
   h+=`<section class="sec"><div class="sh">Сегодня<span class="sp"><button class="btn sm" data-act="newtask">＋ Задача</button></span></div>
     ${now.length||doneToday.length?`<div class="list">${now.map(t=>taskRow(t,own)).join("")}${doneToday.map(t=>taskRow(t,own,{done:true})).join("")}</div>`:`<div class="empty">На сегодня ничего нет.</div>`}</section>`;
-  if(soon.length)h+=`<section class="sec"><h2>Скоро (30 дней)</h2><div class="list">${soon.map(t=>taskRow(t,own)).join("")}</div></section>`;
-  h+=`<section class="sec"><h2>Уход: регулярные дела</h2>
+  if(soon.length)r+=`<section class="sec"><h2>Скоро (30 дней)</h2><div class="list">${soon.map(t=>taskRow(t,own)).join("")}</div></section>`;
+  r+=`<section class="sec"><h2>Уход: регулярные дела</h2>
     ${care.length?`<div class="list">${care.map(t=>`<button class="row" data-task="${t.id}"><span class="ic">${isDaily(t)?"🧽":"🔁"}</span><span class="tx"><span class="nm">${esc(t.title)}</span><span class="meta">${esc(repeatLabel(t))}${t.due_date?" · следующий раз "+fmtShort(t.due_date):""}</span></span></button>`).join("")}</div>`:""}
     <div class="hint">Это те же задачи, что в «Задачах» с пометкой ${KINDS[P().kind].icon}: отметили здесь — отмечено и там.</div></section>`;
-  main.innerHTML=h;
+  main.innerHTML=`<div class="c2"><div class="ca">${h}</div><div class="ca">${r}</div></div>`;
 }
 
 function taskModal(t){
@@ -288,6 +288,7 @@ function stepHTML(s,sc){
 function procHTML(){
   const scs=mine(S.schemes).sort((a,b)=>(a.ord||0)-(b.ord||0)||a.created_at.localeCompare(b.created_at));
   let h=`<div class="hint">Цепочка процедур: например, от блох → через N дней от глистов → через N дней прививка. Срок следующего шага считается от дня, когда сделан предыдущий. Интервалы — как скажет врач.</div>`;
+  h+=`<div class="cards">`;
   for(const sc of scs){
     const rs=runsOf(sc),cur=rs.find(r=>!runDone(r))||null,past=rs.filter(r=>r!==cur);
     h+=`<div class="card"><div class="ch"><span class="tx"><h3>${esc(sc.name)}</h3><span class="meta">${(sc.steps||[]).length} шаг. ${sc.repeat_months?"· круг каждые "+sc.repeat_months+" мес.":""} · напомнить за ${sc.remind_days} дн.</span></span>
@@ -298,7 +299,7 @@ function procHTML(){
       ${past.length?`<details class="past"><summary>История: ${plural(past.length,"круг","круга","кругов")}</summary>${past.map(r=>`<div class="meta" style="margin-bottom:6px"><b>${fmt(r.start_on)}</b>: ${stepsOf(r).map(s=>esc(s.title)+" — "+(s.done_on?fmtShort(s.done_on):"не сделано")).join("; ")}</div>`).join("")}</details>`:""}
     </div>`;
   }
-  h+=`<button class="add" data-act="newscheme">＋ Новая схема</button>`;
+  h+=`</div><button class="add" data-act="newscheme">＋ Новая схема</button>`;
   return h;
 }
 function schemeModal(sc){
@@ -380,8 +381,8 @@ function medsHTML(){
   const live=x=>(x.stopped_on||x.end_on)>=t0;
   const act=ms.filter(live),past=ms.filter(x=>!live(x));
   let h=`<button class="add" data-act="newmed">＋ Лекарство</button>`;
-  h+=act.length?act.map(x=>medHTML(x,true)).join(""):`<div class="empty">Сейчас ничего не даём 🎉</div>`;
-  if(past.length)h+=`<section class="sec"><h2>История курсов</h2>${past.map(x=>medHTML(x,false)).join("")}</section>`;
+  h+=act.length?`<div class="cards">${act.map(x=>medHTML(x,true)).join("")}</div>`:`<div class="empty">Сейчас ничего не даём 🎉</div>`;
+  if(past.length)h+=`<section class="sec"><h2>История курсов</h2><div class="cards">${past.map(x=>medHTML(x,false)).join("")}</div></section>`;
   return h;
 }
 function medModal(x){
@@ -435,9 +436,9 @@ function vetHTML(){
   const vs=mine(S.visits).sort((a,b)=>b.day.localeCompare(a.day));
   let h=`<button class="add" data-act="newvisit">＋ Приём</button>`;
   if(!vs.length)return h+`<div class="empty"><b>Дневник пуст</b>Записывай: зачем пришли, что сделали по факту, что назначили.</div>`;
-  h+=vs.map(x=>`<div class="card"><div class="ch"><span class="ic" style="font-size:22px">🏥</span><span class="tx"><h3>${fmt(x.day)} — ${esc(x.reason||"приём")}</h3>${x.clinic?`<span class="meta">${esc(x.clinic)}</span>`:""}</span>
+  h+=`<div class="cards">`+vs.map(x=>`<div class="card"><div class="ch"><span class="ic" style="font-size:22px">🏥</span><span class="tx"><h3>${fmt(x.day)} — ${esc(x.reason||"приём")}</h3>${x.clinic?`<span class="meta">${esc(x.clinic)}</span>`:""}</span>
     <button class="icon" data-visit="${x.id}" aria-label="Изменить">✎</button></div>
-    ${x.done||x.prescribed||x.next_on||x.note?`<dl class="kv">${x.done?`<dt>Сделали</dt><dd>${esc(x.done)}</dd>`:""}${x.prescribed?`<dt>Назначили</dt><dd>${esc(x.prescribed)}</dd>`:""}${x.next_on?`<dt>Следующий</dt><dd>${fmt(x.next_on)}${x.next_why?" — "+esc(x.next_why):""} ${x.next_on>=today()?dueBadge(x.next_on,7):""}</dd>`:""}${x.note?`<dt>Заметка</dt><dd>${esc(x.note)}</dd>`:""}</dl>`:""}</div>`).join("");
+    ${x.done||x.prescribed||x.next_on||x.note?`<dl class="kv">${x.done?`<dt>Сделали</dt><dd>${esc(x.done)}</dd>`:""}${x.prescribed?`<dt>Назначили</dt><dd>${esc(x.prescribed)}</dd>`:""}${x.next_on?`<dt>Следующий</dt><dd>${fmt(x.next_on)}${x.next_why?" — "+esc(x.next_why):""} ${x.next_on>=today()?dueBadge(x.next_on,7):""}</dd>`:""}${x.note?`<dt>Заметка</dt><dd>${esc(x.note)}</dd>`:""}</dl>`:""}</div>`).join("")+`</div>`;
   return h;
 }
 function visitModal(x){
@@ -481,25 +482,45 @@ function wFlags(p,list){
     const near=prev!==null&&daysBetween(list[i-1].day,w.day)<=45;
     return {w,kg,d,out,grow:!g,jump:g&&near&&p.w_jump&&Math.abs(d)>p.w_jump}});
 }
+// ширина графика — по ширине страницы (1 единица = 1 пиксель, подписи не мельчают); ось X — по датам
+const MON=["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
+function chartWidth(){const cs=getComputedStyle(main);return Math.max(280,main.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight)-18)}
 function chartSVG(p,fl){
   const from=addDays(today(),-365);let pts=wRange==="all"?fl:fl.filter(x=>x.w.day>=from);
   if(pts.length<2)pts=fl.slice(-12);if(pts.length<1)return"";
-  const long=pts[pts.length-1].w.day.slice(0,4)!==pts[0].w.day.slice(0,4)&&wRange==="all";
-  const W=640,H=260,L=60,R=14,T=14,B=36;
+  const W=chartWidth(),H=W>700?300:230,L=44,R=14,T=12,B=30;
   const vals=pts.map(x=>x.kg).concat([+p.w_min||null,+p.w_max||null].filter(Boolean));
-  let lo=Math.min(...vals),hi=Math.max(...vals);const pad=Math.max(.15,(hi-lo)*.15);lo-=pad;hi+=pad;
-  const X=i=>pts.length===1?(L+W-R)/2:L+i*(W-L-R)/(pts.length-1),Y=v=>T+(hi-v)*(H-T-B)/(hi-lo);
-  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="График веса">`;
-  if(p.w_min&&p.w_max)s+=`<rect class="band" x="${L}" y="${Y(+p.w_max)}" width="${W-L-R}" height="${Y(+p.w_min)-Y(+p.w_max)}" rx="4"/>`;
+  let lo=Math.floor((Math.min(...vals)-.1)*4)/4,hi=Math.ceil((Math.max(...vals)+.1)*4)/4;
+  // по X — время: месяц без взвешиваний занимает своё место
+  let d0=pts[0].w.day,d1=pts[pts.length-1].w.day;
+  if(wRange!=="all"&&daysBetween(from,d0)>0)d0=from;
+  if(d0===d1){d0=addDays(d0,-15);d1=addDays(d1,15)}
+  const span=daysBetween(d0,d1);
+  const X=d=>L+daysBetween(d0,d)/span*(W-L-R),Y=v=>T+(hi-v)*(H-T-B)/(hi-lo);
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="График веса">`;
+  // сетка и подписи веса: шаг 0,25 или 0,5 кг
+  const ys=(hi-lo)>1.6?.5:.25;
+  for(let v=Math.ceil(lo/ys)*ys;v<=hi+1e-9;v+=ys)s+=`<line class="grid" x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L-8}" y="${Y(v)+4}" text-anchor="end">${n2(Math.round(v*100)/100)}</text>`;
+  if(p.w_min&&p.w_max)s+=`<rect class="band" x="${L}" y="${Y(Math.min(+p.w_max,hi))}" width="${W-L-R}" height="${Y(Math.max(+p.w_min,lo))-Y(Math.min(+p.w_max,hi))}"/>`;
   if(p.w_norm)s+=`<line class="norm" x1="${L}" x2="${W-R}" y1="${Y(+p.w_norm)}" y2="${Y(+p.w_norm)}"/>`;
-  const ticks=[lo+pad,(lo+hi)/2,hi-pad];
-  ticks.forEach(v=>s+=`<text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${n2(Math.round(v*10)/10)}</text>`);
-  s+=`<polyline class="ln" points="${pts.map((x,i)=>X(i)+","+Y(x.kg)).join(" ")}"/>`;
-  pts.forEach((x,i)=>s+=`<circle class="pt${x.out||x.jump?" bad":x.grow?" grow":""}" cx="${X(i)}" cy="${Y(x.kg)}" r="${pts.length>30?5:7}"><title>${fmt(x.w.day)}: ${n2(x.kg)} кг</title></circle>`);
-  const step=Math.max(1,Math.ceil(pts.length/6));
-  pts.forEach((x,i)=>{if(i%step===0||i===pts.length-1)s+=`<text x="${X(i)}" y="${H-6}" text-anchor="middle">${long?x.w.day.slice(5,7)+"."+x.w.day.slice(2,4):x.w.day.slice(8,10)+"."+x.w.day.slice(5,7)}</text>`});
+  // подписи месяцев: шаг 1/2/3/6/12 мес., чтобы между ними было ≥ 64 px
+  const months=span/30.44,fit=Math.max(1,Math.floor((W-L-R)/64));
+  const mstep=[1,2,3,6,12,24].find(k=>months/k<=fit)||24;
+  let m=parse(d0);m=new Date(m.getFullYear(),m.getMonth()+1,1);
+  while(m.getMonth()%mstep)m.setMonth(m.getMonth()+1);
+  let prevY=null;
+  for(;iso(m)<=d1;m.setMonth(m.getMonth()+mstep)){
+    const x=X(iso(m)),y=m.getFullYear();
+    const lab=mstep>=12?String(y):(m.getMonth()===0||prevY===null?MON[m.getMonth()]+" "+String(y).slice(2):MON[m.getMonth()]);prevY=y;
+    s+=`<line class="grid${m.getMonth()===0?" yr":""}" x1="${x}" x2="${x}" y1="${T}" y2="${H-B}"/><text x="${x}" y="${H-9}" text-anchor="middle">${lab}</text>`;
+  }
+  s+=`<polyline class="ln" points="${pts.map(x=>X(x.w.day).toFixed(1)+","+Y(x.kg).toFixed(1)).join(" ")}"/>`;
+  const r=W/pts.length<14?3.5:5;
+  pts.forEach(x=>s+=`<circle class="pt${x.out||x.jump?" bad":x.grow?" grow":""}" cx="${X(x.w.day).toFixed(1)}" cy="${Y(x.kg).toFixed(1)}" r="${r}"><title>${fmt(x.w.day)}: ${n2(x.kg)} кг</title></circle>`);
   return s+"</svg>";
 }
+let resizeT=null;
+addEventListener("resize",()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{if(S&&tab==="weight"&&!$("#modalRoot").innerHTML)render()},150)});
 let wRange=ls.get("wrange","year");
 function renderWeight(){
   const p=P(),fl=wFlags(p,wOf()),last=fl[fl.length-1];
@@ -508,7 +529,7 @@ function renderWeight(){
     ${last&&(last.out||last.jump)?`<div class="d-bad">⚠ ${last.out?"Вес вне обычной зоны ("+n2(+p.w_min)+"–"+n2(+p.w_max)+" кг)":"Вес резко изменился"} — стоит показать врачу.</div>`:""}
     <span class="meta">${p.birthday?`До ${ADULT} месяцев (до ${fmt(addMonths(p.birthday,ADULT))}) — рост, серые точки, без предупреждений. `:""}Зелёная зона: ${p.w_min?n2(+p.w_min):"—"}–${p.w_max?n2(+p.w_max):"—"} кг, обычный вес ${p.w_norm?n2(+p.w_norm):"—"} кг, предупреждать при скачке больше ${p.w_jump||"—"} г за месяц (меняется в профиле).</span></div>`;
   if(fl.length)h+=`<div class="chart"><div class="seg" style="margin:0 4px 8px">${[["year","За год"],["all","За всё время"]].map(([k,v])=>`<button data-wrange="${k}" aria-pressed="${k===wRange}">${v}</button>`).join("")}</div>${chartSVG(p,fl)}</div>`;
-  if(fl.length)h+=`<section class="sec"><h2>Все взвешивания</h2><div class="list">${[...fl].reverse().map(x=>`<button class="row" data-weight="${x.w.id}"><span class="tx"><span class="nm">${n2(x.kg)} кг</span><span class="meta">${fmt(x.w.day)}${x.w.note?" · "+esc(x.w.note):""}</span></span>
+  if(fl.length)h+=`<section class="sec"><h2>Все взвешивания</h2><div class="list wl">${[...fl].reverse().map(x=>`<button class="row" data-weight="${x.w.id}"><span class="tx"><span class="nm">${n2(x.kg)} кг</span><span class="meta">${fmt(x.w.day)}${x.w.note?" · "+esc(x.w.note):""}</span></span>
     ${x.d!==null?`<span class="${x.jump?"d-bad":x.d>0?"d-up":"meta"}">${x.d>0?"+":""}${x.d} г</span>`:""}${x.out?`<span class="badge b-late">вне зоны</span>`:""}${x.grow?`<span class="badge b-date">растёт</span>`:""}</button>`).join("")}</div></section>`;
   main.innerHTML=h;
 }
@@ -549,7 +570,7 @@ function renderFood(){
     if(list.length>1)h+=timeline(list);
     h+=`</section>`;
   }
-  main.innerHTML=h;
+  main.innerHTML=`<div class="c3">${h}</div>`;
 }
 function periodRow(x,cur){
   const len=x.start_on?daysBetween(x.start_on,x.end_on||today()):null;
@@ -604,12 +625,12 @@ function renderProfile(){
     <button class="icon" data-act="editpet" aria-label="Изменить профиль">✎</button></div>
     <dl class="kv">${fields.map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
     ${p.notes?`<div style="white-space:pre-wrap">${esc(p.notes)}</div>`:""}</div>`;
-  h+=`<section class="sec"><div class="sh">📝 Заметки<span class="sp"><button class="btn sm" data-act="newnote">＋ Заметка</button></span></div>
+  let r=`<section class="sec"><div class="sh">📝 Заметки<span class="sp"><button class="btn sm" data-act="newnote">＋ Заметка</button></span></div>
     ${ns.length?`<div class="list">${ns.map(x=>`<button class="row" data-note="${x.id}"><span class="tx"><span class="nm">${x.pinned?"📌 ":""}${esc(x.title)}</span>${x.body?`<span class="meta" style="white-space:pre-wrap">${esc(x.body.length>220?x.body.slice(0,220)+"…":x.body)}</span>`:""}</span></button>`).join("")}</div>`
     :`<div class="empty">Привычки, что любит и не любит, важное про здоровье.</div>`}</section>`;
   const free=Object.keys(KINDS).filter(k=>!S.pets.some(x=>x.kind===k));
-  if(free.length)h+=`<section class="sec"><h2>Другие питомцы</h2><div class="btns">${free.map(k=>`<button class="add" data-newpet="${k}">＋ ${KINDS[k].icon} ${KINDS[k].name}</button>`).join("")}</div></section>`;
-  main.innerHTML=h;
+  if(free.length)r+=`<section class="sec"><h2>Другие питомцы</h2><div class="btns">${free.map(k=>`<button class="add" data-newpet="${k}">＋ ${KINDS[k].icon} ${KINDS[k].name}</button>`).join("")}</div></section>`;
+  main.innerHTML=`<div class="c2"><div class="ca">${h}</div><div class="ca">${r}</div></div>`;
 }
 function petModal(p){
   openModal(`<h2>${KINDS[p.kind].icon} Профиль</h2>
