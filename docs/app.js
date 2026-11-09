@@ -464,16 +464,27 @@ function visitModal(x){
 }
 
 /* ===== Вес ===== */
+const ADULT=12;   // с скольких месяцев вес считается взрослым
+function addMonths(s,n){const d=parse(s),t=new Date(d.getFullYear(),d.getMonth()+n,1);t.setDate(Math.min(d.getDate(),new Date(t.getFullYear(),t.getMonth()+1,0).getDate()));return iso(t)}
 const wOf=()=>mine(S.weights).sort((a,b)=>a.day.localeCompare(b.day)||a.created_at.localeCompare(b.created_at));
 function wFlags(p,list){
-  // вне зелёной зоны или скачок больше порога (г) от прошлого взвешивания
+  // вне зелёной зоны или скачок больше порога (г) от прошлого взвешивания.
+  // Пока растёт — не предупреждаем: до года (ADULT месяцев от дня рождения), без дня рождения — пока ни разу не дорос до нижней границы.
+  const adult=p.birthday?addMonths(p.birthday,ADULT):null;
+  let grown=!p.w_min;
   return list.map((w,i)=>{const kg=+w.kg,prev=i?+list[i-1].kg:null;
-    const out=(p.w_min&&kg<+p.w_min)||(p.w_max&&kg>+p.w_max);
+    let g=grown;if(kg>=+p.w_min)grown=true;
+    if(adult)g=w.day>=adult;
+    const out=g&&((p.w_min&&kg<+p.w_min)||(p.w_max&&kg>+p.w_max));
     const d=prev===null?null:Math.round((kg-prev)*1000);
-    return {w,kg,d,out,jump:d!==null&&p.w_jump&&Math.abs(d)>p.w_jump}});
+    // скачок — только между взвешиваниями не дальше 45 дней (за полгода +400 г — не тревога)
+    const near=prev!==null&&daysBetween(list[i-1].day,w.day)<=45;
+    return {w,kg,d,out,grow:!g,jump:g&&near&&p.w_jump&&Math.abs(d)>p.w_jump}});
 }
 function chartSVG(p,fl){
-  const pts=fl.slice(-24);if(pts.length<1)return"";
+  const from=addDays(today(),-365);let pts=wRange==="all"?fl:fl.filter(x=>x.w.day>=from);
+  if(pts.length<2)pts=fl.slice(-12);if(pts.length<1)return"";
+  const long=pts[pts.length-1].w.day.slice(0,4)!==pts[0].w.day.slice(0,4)&&wRange==="all";
   const W=640,H=260,L=60,R=14,T=14,B=36;
   const vals=pts.map(x=>x.kg).concat([+p.w_min||null,+p.w_max||null].filter(Boolean));
   let lo=Math.min(...vals),hi=Math.max(...vals);const pad=Math.max(.15,(hi-lo)*.15);lo-=pad;hi+=pad;
@@ -484,20 +495,21 @@ function chartSVG(p,fl){
   const ticks=[lo+pad,(lo+hi)/2,hi-pad];
   ticks.forEach(v=>s+=`<text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${n2(Math.round(v*10)/10)}</text>`);
   s+=`<polyline class="ln" points="${pts.map((x,i)=>X(i)+","+Y(x.kg)).join(" ")}"/>`;
-  pts.forEach((x,i)=>s+=`<circle class="pt${x.out||x.jump?" bad":""}" cx="${X(i)}" cy="${Y(x.kg)}" r="7"><title>${fmt(x.w.day)}: ${n2(x.kg)} кг</title></circle>`);
+  pts.forEach((x,i)=>s+=`<circle class="pt${x.out||x.jump?" bad":x.grow?" grow":""}" cx="${X(i)}" cy="${Y(x.kg)}" r="${pts.length>30?5:7}"><title>${fmt(x.w.day)}: ${n2(x.kg)} кг</title></circle>`);
   const step=Math.max(1,Math.ceil(pts.length/6));
-  pts.forEach((x,i)=>{if(i%step===0||i===pts.length-1)s+=`<text x="${X(i)}" y="${H-6}" text-anchor="middle">${x.w.day.slice(8,10)}.${x.w.day.slice(5,7)}</text>`});
+  pts.forEach((x,i)=>{if(i%step===0||i===pts.length-1)s+=`<text x="${X(i)}" y="${H-6}" text-anchor="middle">${long?x.w.day.slice(5,7)+"."+x.w.day.slice(2,4):x.w.day.slice(8,10)+"."+x.w.day.slice(5,7)}</text>`});
   return s+"</svg>";
 }
+let wRange=ls.get("wrange","year");
 function renderWeight(){
   const p=P(),fl=wFlags(p,wOf()),last=fl[fl.length-1];
   let h=`<div class="card"><div class="ch"><span class="tx">${last?`<span class="big">${n2(last.kg)} кг</span><span class="meta">${fmt(last.w.day)}${last.d!==null?` · ${last.d>0?"+":""}${last.d} г с прошлого раза`:""}</span>`:`<span class="nm">Взвешиваний пока нет</span>`}</span>
     <button class="btn pri" data-act="newweight">＋ Взвесить</button></div>
     ${last&&(last.out||last.jump)?`<div class="d-bad">⚠ ${last.out?"Вес вне обычной зоны ("+n2(+p.w_min)+"–"+n2(+p.w_max)+" кг)":"Вес резко изменился"} — стоит показать врачу.</div>`:""}
-    <span class="meta">Зелёная зона: ${p.w_min?n2(+p.w_min):"—"}–${p.w_max?n2(+p.w_max):"—"} кг, обычный вес ${p.w_norm?n2(+p.w_norm):"—"} кг, предупреждать при скачке больше ${p.w_jump||"—"} г (меняется в профиле).</span></div>`;
-  if(fl.length)h+=`<div class="chart">${chartSVG(p,fl)}</div>`;
+    <span class="meta">${p.birthday?`До ${ADULT} месяцев (до ${fmt(addMonths(p.birthday,ADULT))}) — рост, серые точки, без предупреждений. `:""}Зелёная зона: ${p.w_min?n2(+p.w_min):"—"}–${p.w_max?n2(+p.w_max):"—"} кг, обычный вес ${p.w_norm?n2(+p.w_norm):"—"} кг, предупреждать при скачке больше ${p.w_jump||"—"} г за месяц (меняется в профиле).</span></div>`;
+  if(fl.length)h+=`<div class="chart"><div class="seg" style="margin:0 4px 8px">${[["year","За год"],["all","За всё время"]].map(([k,v])=>`<button data-wrange="${k}" aria-pressed="${k===wRange}">${v}</button>`).join("")}</div>${chartSVG(p,fl)}</div>`;
   if(fl.length)h+=`<section class="sec"><h2>Все взвешивания</h2><div class="list">${[...fl].reverse().map(x=>`<button class="row" data-weight="${x.w.id}"><span class="tx"><span class="nm">${n2(x.kg)} кг</span><span class="meta">${fmt(x.w.day)}${x.w.note?" · "+esc(x.w.note):""}</span></span>
-    ${x.d!==null?`<span class="${x.jump?"d-bad":x.d>0?"d-up":"meta"}">${x.d>0?"+":""}${x.d} г</span>`:""}${x.out?`<span class="badge b-late">вне зоны</span>`:""}</button>`).join("")}</div></section>`;
+    ${x.d!==null?`<span class="${x.jump?"d-bad":x.d>0?"d-up":"meta"}">${x.d>0?"+":""}${x.d} г</span>`:""}${x.out?`<span class="badge b-late">вне зоны</span>`:""}${x.grow?`<span class="badge b-date">растёт</span>`:""}</button>`).join("")}</div></section>`;
   main.innerHTML=h;
 }
 function weightModal(w){
@@ -648,7 +660,7 @@ const HELP=[
   ["Лекарства","Пишешь: с какого по какое число давать (включительно), сколько за раз, сколько раз в день и раз в сколько дней. Приложение само считает дни курса, число приёмов и сколько всего таблеток или миллилитров нужно. Каждый приём — задача с напоминанием в своё время; после последнего дня она закончится сама. «Закончить сегодня» — если врач отменил раньше."],
   ["Процедуры (схемы)","Цепочка шагов, например: от блох → через 7 дней от глистов → через 10 дней прививка (интервалы — как скажет врач). Начинаешь круг — каждому шагу появляется задача. Отметила шаг позже или раньше — сроки следующих сдвигаются сами. После последнего шага новый круг ставится сам через заданное число месяцев. Напоминание приходит за N дней."],
   ["Ветклиника","Дневник приёмов по датам: зачем пришли, что сделали по факту, что назначили. «Следующий приём» сразу становится задачей с напоминанием за неделю."],
-  ["Вес","Записываешь вес (можно в граммах: 4520). Зелёная полоса на графике — обычная зона, пунктир — обычный вес. Красная точка — вне зоны или резкий скачок. Если в «Задачах» есть задача «Взвесить…», она отметится сама."],
+  ["Вес","Записываешь вес (можно в граммах: 4520). Зелёная полоса на графике — обычная зона, пунктир — обычный вес. Красная точка — вне зоны или скачок больше порога меньше чем за полтора месяца. Первый год (от дня рождения) — рост: серые точки без предупреждений. Если в «Задачах» есть задача «Взвесить…», она отметится сама."],
   ["Питание","Корм, наполнитель и другое — периодами «с … по …». Начинаешь новый корм — прежний закрывается днём раньше. «Проверить до» — для назначенного на срок: за неделю придёт задача спросить врача."],
 ];
 function openHelp(){openModal(`<h2>Справка</h2><div class="help">${HELP.map(([t,x])=>`<details><summary>${t}</summary><p>${x}</p></details>`).join("")}</div>
@@ -656,9 +668,50 @@ function openHelp(){openModal(`<h2>Справка</h2><div class="help">${HELP.m
 function openGear(){openModal(`<h2>Настройки</h2>
   <p class="meta" style="margin:0">${esc(user.email||"")}</p>
   <div class="hint">Пуши на телефон включаются в «Задачах» (⚙ → «Уведомления»): все напоминания отсюда приходят оттуда.</div>
+  <div class="btns"><button class="btn" id="imp">📁 Загрузить из файла</button><button class="btn" id="exp">💾 Скачать копию</button></div>
+  <p class="meta" style="margin:0">Файл готовит Claude: вес, приёмы у врача, корм, заметки — для питомца «${esc(P()?.name||"")}». Что уже есть, не задваивается.</p>
+  <input type="file" id="impf" accept=".json,application/json" hidden>
   <div class="mact"><button class="btn left danger" id="out">Выйти</button><button class="btn" data-close>Закрыть</button></div>`,m=>{
   m.querySelector("#out").onclick=()=>{closeModal();sb.auth.signOut()};
+  m.querySelector("#exp").onclick=exportFile;
+  const f=m.querySelector("#impf");
+  m.querySelector("#imp").onclick=()=>{if(!P())return toast("Сначала создай профиль");f.click()};
+  f.onchange=async()=>{const file=f.files[0];if(!file)return;
+    try{const d=JSON.parse(await file.text());closeModal();await importData(d)}catch(e){toast("Не удалось прочитать файл: "+e.message)}};
 })}
+// загрузка из файла: {weights:[{day,kg,note}], visits:[{day,clinic,reason,done,prescribed,note}], periods:[{type,name,reason,start_on,end_on,note}], notes:[{title,body}]}
+async function importData(d){
+  const p=P(),key=(...a)=>a.map(x=>String(x??"").trim().toLowerCase()).join("|");
+  const have={w:new Set(mine(S.weights).map(x=>key(x.day,(+x.kg).toFixed(3)))),v:new Set(mine(S.visits).map(x=>key(x.day,x.reason))),
+    p:new Set(mine(S.periods).map(x=>key(x.type,x.name,x.start_on))),n:new Set(mine(S.notes).map(x=>key(x.title)))};
+  const isDay=s=>/^\d{4}-\d{2}-\d{2}$/.test(s||"");
+  const W=(d.weights||[]).filter(x=>isDay(x.day)&&num(x.kg)>0).map(x=>({pet_id:p.id,day:x.day,kg:num(x.kg)>100?num(x.kg)/1000:num(x.kg),note:x.note||null})).filter(x=>!have.w.has(key(x.day,x.kg.toFixed(3))));
+  // следующий приём ставим, только если он ещё впереди (иначе получится старая задача)
+  const V=(d.visits||[]).filter(x=>isDay(x.day)).map(x=>({pet_id:p.id,day:x.day,clinic:x.clinic||null,reason:x.reason||null,done:x.done||null,prescribed:x.prescribed||null,note:x.note||null,
+    next_on:isDay(x.next_on)&&x.next_on>=today()?x.next_on:null,next_why:x.next_why||null})).filter(x=>!have.v.has(key(x.day,x.reason)));
+  const PR=(d.periods||[]).filter(x=>x.name&&PTYPES[x.type||"food"]).map(x=>({pet_id:p.id,type:x.type||"food",name:x.name,reason:x.reason||null,start_on:isDay(x.start_on)?x.start_on:null,end_on:isDay(x.end_on)?x.end_on:null,
+    check_on:isDay(x.check_on)&&x.check_on>=today()?x.check_on:null,note:x.note||null})).filter(x=>!have.p.has(key(x.type,x.name,x.start_on)));
+  const N=(d.notes||[]).filter(x=>x.title).map(x=>({pet_id:p.id,title:x.title,body:x.body||null,pinned:!!x.pinned})).filter(x=>!have.n.has(key(x.title)));
+  const bday=!p.birthday&&isDay(d.pet?.birthday)?d.pet.birthday:null;
+  const total=W.length+V.length+PR.length+N.length+(bday?1:0);
+  if(!total)return toast("Новых записей в файле нет — всё уже загружено");
+  if(!confirm(`Загрузить для «${p.name}»: взвешиваний ${W.length}, приёмов ${V.length}, корм/быт ${PR.length}, заметок ${N.length}${bday?", день рождения "+fmt(bday):""}?`))return;
+  const put=(t,rows)=>rows.length?wr(sb.from(t).insert(rows)):null;
+  await save(Promise.all([put("p_weights",W),put("p_visits",V),put("p_periods",PR),put("p_notes",N),bday?upd("p_pets",p.id,{birthday:bday}):null]),"Загружено: "+total);
+}
+function exportFile(){
+  const p=P();if(!p)return;
+  const pick=(rows,f)=>mine(rows).map(x=>Object.fromEntries(f.map(k=>[k,x[k]])));
+  const d={pet:{name:p.name,kind:p.kind,birthday:p.birthday,sex:p.sex,breed:p.breed,color:p.color,chip:p.chip,notes:p.notes},
+    weights:pick(S.weights,["day","kg","note"]),visits:pick(S.visits,["day","clinic","reason","done","prescribed","next_on","next_why","note"]),
+    periods:pick(S.periods,["type","name","reason","start_on","end_on","check_on","note"]),notes:pick(S.notes,["title","body","pinned"]),
+    meds:pick(S.meds,["name","unit","amount","times","every_days","start_on","end_on","stopped_on","reason","note"]),
+    schemes:pick(S.schemes,["name","steps","repeat_months","remind_days"])};
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(d,null,1)],{type:"application/json"}));
+  a.download=`питомцы-${p.name}-${today()}.json`;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
 
 /* ---------- окна ---------- */
 function openModal(html,init){
@@ -682,6 +735,7 @@ document.addEventListener("click",e=>{
   const d=b.dataset;
   if(d.tab){tab=d.tab;ls.set("tab",tab);render();scrollTo(0,0);return}
   if(d.pet){petId=d.pet;ls.set("pet",petId);render();return}
+  if(d.wrange){wRange=d.wrange;ls.set("wrange",wRange);render();return}
   if(d.htab){hTab=d.htab;ls.set("htab",hTab);render();return}
   if(b.id==="help")return openHelp();
   if(b.id==="gear")return openGear();

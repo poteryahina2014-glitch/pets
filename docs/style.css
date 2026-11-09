@@ -137,6 +137,7 @@ details.past[open]>summary{margin-bottom:8px}
 .chart .ln{fill:none;stroke:var(--accent);stroke-width:4}
 .chart .pt{fill:var(--surface);stroke:var(--accent);stroke-width:3}
 .chart .pt.bad{stroke:var(--danger);fill:var(--danger)}
+.chart .pt.grow{stroke:var(--muted);fill:var(--surface-2)}
 .chart text{fill:var(--muted);font-size:20px;font-family:var(--f-body)}
 .big{font-family:var(--f-display);font-size:30px;font-weight:500;font-variant-numeric:tabular-nums}
 .d-up{color:var(--warn-ink)}.d-bad{color:var(--danger);font-weight:700}
