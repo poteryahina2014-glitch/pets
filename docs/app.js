@@ -741,7 +741,14 @@ function openModal(html,init){
   const ov=root.firstChild,m=ov.firstChild;
   ov.addEventListener("click",e=>{if(e.target===ov||e.target.closest("[data-close]"))closeModal()});
   document.addEventListener("keydown",escClose);
-  init&&init(m);return m;
+  init&&init(m);fitModal(m);return m;
+}
+/* Окно .fixed — высота по содержимому, замеренная при открытии (а не 760 px с пустым местом внизу).
+   Дальше от нажатий не меняется: поле «по расписанию» держит место через visibility, лишнее прокручивается внутри. */
+function fitModal(m){
+  if(!m.classList.contains("fixed"))return;
+  m.style.height="auto";
+  m.style.height=Math.min(m.scrollHeight+2,innerHeight-12)+"px";
 }
 function escClose(e){if(e.key==="Escape")closeModal()}
 function closeModal(){$("#modalRoot").innerHTML="";document.removeEventListener("keydown",escClose)}
