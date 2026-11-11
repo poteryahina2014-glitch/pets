@@ -207,8 +207,7 @@ function renderToday(){
     ${now.length||doneToday.length?`<div class="list">${now.map(t=>taskRow(t,own)).join("")}${doneToday.map(t=>taskRow(t,own,{done:true})).join("")}</div>`:`<div class="empty">На сегодня ничего нет.</div>`}</section>`;
   if(soon.length)r+=`<section class="sec"><h2>Скоро (30 дней)</h2><div class="list">${soon.map(t=>taskRow(t,own)).join("")}</div></section>`;
   r+=`<section class="sec"><h2>Уход: регулярные дела</h2>
-    ${care.length?`<div class="list">${care.map(t=>`<button class="row" data-task="${t.id}"><span class="ic">${isDaily(t)?"🧽":"🔁"}</span><span class="tx"><span class="nm">${esc(t.title)}</span><span class="meta">${esc(repeatLabel(t))}${t.due_date?" · следующий раз "+fmtShort(t.due_date):""}</span></span></button>`).join("")}</div>`:""}
-    <div class="hint">Это те же задачи, что в «Задачах» с пометкой ${KINDS[P().kind].icon}: отметили здесь — отмечено и там.</div></section>`;
+    ${care.length?`<div class="list">${care.map(t=>`<button class="row" data-task="${t.id}"><span class="ic">${isDaily(t)?"🧽":"🔁"}</span><span class="tx"><span class="nm">${esc(t.title)}</span><span class="meta">${esc(repeatLabel(t))}${t.due_date?" · следующий раз "+fmtShort(t.due_date):""}</span></span></button>`).join("")}</div>`:""}</section>`;
   main.innerHTML=`<div class="c2"><div class="ca">${h}</div><div class="ca">${r}</div></div>`;
 }
 
@@ -220,7 +219,7 @@ function taskModal(t){
   let mode=!e.repeat_unit?"once":isDaily(e)?"daily":"repeat";
   openModal(`<h2>${t?"Задача":"Новая задача"}</h2>
     <div class="fld"><label for="tt">Что сделать</label><input id="tt" value="${esc(e.title)}" placeholder="Помыть миски"></div>
-    ${fancy?`<div class="hint">Повтор: ${esc(repeatLabel(e))}. Такой повтор меняется в «Задачах».</div>`:`
+    ${fancy?`<div class="hint">Повтор: ${esc(repeatLabel(e))}</div>`:`
     <div class="seg" id="tm">${[["once","Один раз"],["daily","Каждый день"],["repeat","Повтор"]].map(([k,v])=>`<button data-m="${k}" aria-pressed="${k===mode}">${v}</button>`).join("")}</div>
     <div class="grid3" id="trep"><div class="fld"><label for="tn">Раз в</label><input id="tn" type="number" min="1" value="${e.repeat_every||1}"></div>
       <div class="fld"><label for="tu">&nbsp;</label><select id="tu">${[["day","дней"],["week","недель"],["month","месяцев"],["year","лет"]].map(([k,v])=>`<option value="${k}"${e.repeat_unit===k?" selected":""}>${v}</option>`).join("")}</select></div>
@@ -228,7 +227,6 @@ function taskModal(t){
     <div class="grid3"><div class="fld"><label for="td">${mode==="once"?"Срок":"Следующий раз"}</label><input id="td" type="date" value="${e.due_date||""}"></div>
       <div class="fld"><label for="ta">Напомнить в</label><input id="ta" type="time" value="${(e.remind_at||"").slice(0,5)}"></div>
       <div class="fld"><label for="tr">И за, дней</label><input id="tr" type="number" min="0" max="60" placeholder="—" value="${e.remind_days||""}"></div></div>
-    <div class="hint">Задача появится и в «Задачах» (раздел «Питомцы», значок ${KINDS[P().kind].icon}).</div>
     <div class="mact">${t?`<button class="btn danger left" id="tdel">Удалить</button>`:""}<button class="btn" data-close>Отмена</button><button class="btn pri" id="tsave">Сохранить</button></div>`,m=>{
     m.classList.add("fixed");
     const sync=()=>{const r=m.querySelector("#trep");if(r)r.style.visibility=mode==="repeat"?"visible":"hidden";m.querySelector("label[for=td]").textContent=mode==="once"?"Срок":"Следующий раз"};
@@ -257,7 +255,7 @@ function ownedModal(t,o){
   const ll=lastLog(t.id);
   openModal(`<h2>${esc(t.title)}</h2>
     <dl class="kv"><dt>Срок</dt><dd>${t.due_date?fmt(t.due_date):"—"}${t.done_on?" · сделано "+fmt(t.done_on):""}</dd>${t.repeat_unit?`<dt>Повтор</dt><dd>${esc(repeatLabel(t))}${t.repeat_until?" по "+fmt(t.repeat_until):""}</dd>`:""}</dl>
-    <div class="hint">Эта задача создана из раздела «${where}» — сроки меняются там.</div>
+    <div class="hint">Из раздела «${where}»</div>
     <div class="fld"><label for="od">Сделано в день</label><input id="od" type="date" value="${today()}"></div>
     <div class="mact">${ll&&ll.status==="done"?`<button class="btn left" id="oundo">Снять последнюю отметку</button>`:""}<button class="btn" data-close>Закрыть</button>${t.done_on?"":`<button class="btn pri" id="odone">✓ Сделано</button>`}</div>`,m=>{
     const d=m.querySelector("#odone");if(d)d.onclick=()=>{const day=m.querySelector("#od").value||today();closeModal();complete(t,day)};
@@ -287,7 +285,7 @@ function stepHTML(s,sc){
 }
 function procHTML(){
   const scs=mine(S.schemes).sort((a,b)=>(a.ord||0)-(b.ord||0)||a.created_at.localeCompare(b.created_at));
-  let h=`<div class="hint">Цепочка процедур: например, от блох → через N дней от глистов → через N дней прививка. Срок следующего шага считается от дня, когда сделан предыдущий. Интервалы — как скажет врач.</div>`;
+  let h=``;
   h+=`<div class="cards">`;
   for(const sc of scs){
     const rs=runsOf(sc),cur=rs.find(r=>!runDone(r))||null,past=rs.filter(r=>r!==cur);
@@ -310,7 +308,6 @@ function schemeModal(sc){
       <button class="add" id="sadd">＋ Шаг</button></div>
     <div class="grid2"><div class="fld"><label for="sm">Повторять круг каждые, мес.</label><input id="sm" type="number" min="0" max="60" placeholder="не повторять" value="${e.repeat_months||""}"></div>
       <div class="fld"><label for="sr">Напомнить за, дней</label><input id="sr" type="number" min="0" max="60" value="${e.remind_days??7}"></div></div>
-    <div class="hint">Новый круг начнётся сам: последний шаг — через столько месяцев после того, как сделан последний шаг сейчас. Изменения схемы касаются новых кругов.</div>
     <div class="mact">${sc?`<button class="btn danger left" id="sdel">Удалить</button>`:""}<button class="btn" data-close>Отмена</button><button class="btn pri" id="ssave">Сохранить</button></div>`,m=>{
     m.classList.add("fixed");
     const rows=m.querySelector("#srows");
@@ -435,7 +432,7 @@ function medModal(x){
 function vetHTML(){
   const vs=mine(S.visits).sort((a,b)=>b.day.localeCompare(a.day));
   let h=`<button class="add" data-act="newvisit">＋ Приём</button>`;
-  if(!vs.length)return h+`<div class="empty"><b>Дневник пуст</b>Записывай: зачем пришли, что сделали по факту, что назначили.</div>`;
+  if(!vs.length)return h+`<div class="empty">Дневник пуст</div>`;
   h+=`<div class="cards">`+vs.map(x=>`<div class="card"><div class="ch"><span class="ic" style="font-size:22px">🏥</span><span class="tx"><h3>${fmt(x.day)} — ${esc(x.reason||"приём")}</h3>${x.clinic?`<span class="meta">${esc(x.clinic)}</span>`:""}</span>
     <button class="icon" data-visit="${x.id}" aria-label="Изменить">✎</button></div>
     ${x.done||x.prescribed||x.next_on||x.note?`<dl class="kv">${x.done?`<dt>Сделали</dt><dd>${esc(x.done)}</dd>`:""}${x.prescribed?`<dt>Назначили</dt><dd>${esc(x.prescribed)}</dd>`:""}${x.next_on?`<dt>Следующий</dt><dd>${fmt(x.next_on)}${x.next_why?" — "+esc(x.next_why):""} ${x.next_on>=today()?dueBadge(x.next_on,7):""}</dd>`:""}${x.note?`<dt>Заметка</dt><dd>${esc(x.note)}</dd>`:""}</dl>`:""}</div>`).join("")+`</div>`;
@@ -596,8 +593,6 @@ function periodModal(x,type){
     <div class="grid3"><div class="fld"><label for="ps">С</label><input id="ps" type="date" value="${e.start_on||""}"></div>
       <div class="fld"><label for="pe">По</label><input id="pe" type="date" value="${e.end_on||""}"></div>
       <div class="fld"><label for="pc">Проверить до</label><input id="pc" type="date" value="${e.check_on||""}"></div></div>
-    <div class="hint">«По» пусто — значит сейчас. «Проверить до» — если назначено на срок: за неделю придёт задача ${e.type==="food"?"«спросить врача, продолжать ли»":"«проверить»"}.</div>
-    ${prev?`<div class="hint">Прежний «${esc(prev.name)}» закончится днём раньше начала нового.</div>`:""}
     <div class="fld"><label for="po">Заметка</label><textarea id="po">${esc(e.note||"")}</textarea></div>
     <div class="mact">${x?`<button class="btn danger left" id="pdel">Удалить</button>`:""}<button class="btn" data-close>Отмена</button><button class="btn pri" id="psave">Сохранить</button></div>`,m=>{
     m.querySelector("#pn").focus();
@@ -627,7 +622,7 @@ function renderProfile(){
     ${p.notes?`<div style="white-space:pre-wrap">${esc(p.notes)}</div>`:""}</div>`;
   let r=`<section class="sec"><div class="sh">📝 Заметки<span class="sp"><button class="btn sm" data-act="newnote">＋ Заметка</button></span></div>
     ${ns.length?`<div class="list">${ns.map(x=>`<button class="row" data-note="${x.id}"><span class="tx"><span class="nm">${x.pinned?"📌 ":""}${esc(x.title)}</span>${x.body?`<span class="meta" style="white-space:pre-wrap">${esc(x.body.length>220?x.body.slice(0,220)+"…":x.body)}</span>`:""}</span></button>`).join("")}</div>`
-    :`<div class="empty">Привычки, что любит и не любит, важное про здоровье.</div>`}</section>`;
+    :`<div class="empty">Пока пусто</div>`}</section>`;
   const free=Object.keys(KINDS).filter(k=>!S.pets.some(x=>x.kind===k));
   if(free.length)r+=`<section class="sec"><h2>Другие питомцы</h2><div class="btns">${free.map(k=>`<button class="add" data-newpet="${k}">＋ ${KINDS[k].icon} ${KINDS[k].name}</button>`).join("")}</div></section>`;
   main.innerHTML=`<div class="c2"><div class="ca">${h}</div><div class="ca">${r}</div></div>`;
@@ -645,7 +640,6 @@ function petModal(p){
       <div class="fld"><label for="wnorm">Обычный вес, кг</label><input id="wnorm" inputmode="decimal" value="${p.w_norm?n2(+p.w_norm):""}"></div>
       <div class="fld"><label for="wj">Скачок больше, г</label><input id="wj" type="number" min="0" value="${p.w_jump||""}"></div></div>
     <div class="fld"><label for="ao">О питомце</label><textarea id="ao">${esc(p.notes||"")}</textarea></div>
-    <div class="hint">День рождения попадёт в «Задачи» ежегодным событием. Имя — то же, что у ${KINDS[p.kind].icon} в «Задачах».</div>
     <div class="mact"><button class="btn danger left" id="adel">Удалить</button><button class="btn" data-close>Отмена</button><button class="btn pri" id="asave">Сохранить</button></div>`,m=>{
     m.classList.add("fixed");
     const v=id=>m.querySelector(id).value.trim()||null;
@@ -677,20 +671,21 @@ function noteModal(x){
 /* ---------- справка и настройки ---------- */
 const HELP=[
   ["Как это связано с «Задачами»","Все напоминания живут в «Задачах»: там же пуши на телефон и утренняя проверка. Задачи с пометкой питомца видны в обоих приложениях — это одна и та же задача, отметили в одном месте — отмечено и в другом. Новые задачи отсюда попадают в раздел «Питомцы»."],
+  ["Уведомления","Пуши на телефон включаются в «Задачах» (⚙ → «Уведомления»): все напоминания отсюда приходят оттуда. Новая задача отсюда появляется и в «Задачах» — в разделе «Питомцы», со значком питомца; отметили здесь — отмечено и там. Повтор, который здесь не настроить, меняется в «Задачах». Задачи, созданные из лекарств, процедур или питания, меняются там, откуда созданы."],
+  ["Загрузка из файла","⚙ → «Загрузить из файла»: файл готовит Claude — вес, приёмы у врача, корм, заметки для выбранного питомца. Что уже есть, не задваивается. «Скачать копию» — сохранить всё в файл."],
+  ["Профиль","Имя, вид, порода, день рождения и заметки (что любит и не любит, важное про здоровье). День рождения попадает в «Задачи» ежегодным событием; имя — то же, что у значка питомца в «Задачах»."],
   ["Сегодня","Красная плашка — то, что пора было сделать, а не сделано. Ниже — дела на сегодня, «Скоро» на 30 дней вперёд (жёлтым — когда уже пора готовиться) и регулярный уход. Щелчок по названию — изменить."],
   ["Лекарства","Пишешь: с какого по какое число давать (включительно), сколько за раз, сколько раз в день и раз в сколько дней. Приложение само считает дни курса, число приёмов и сколько всего таблеток или миллилитров нужно. Каждый приём — задача с напоминанием в своё время; после последнего дня она закончится сама. «Закончить сегодня» — если врач отменил раньше."],
-  ["Процедуры (схемы)","Цепочка шагов, например: от блох → через 7 дней от глистов → через 10 дней прививка (интервалы — как скажет врач). Начинаешь круг — каждому шагу появляется задача. Отметила шаг позже или раньше — сроки следующих сдвигаются сами. После последнего шага новый круг ставится сам через заданное число месяцев. Напоминание приходит за N дней."],
+  ["Процедуры (схемы)","Цепочка шагов, например: от блох → через 7 дней от глистов → через 10 дней прививка (интервалы — как скажет врач). Начинаешь круг — каждому шагу появляется задача. Отметила шаг позже или раньше — сроки следующих сдвигаются сами. После последнего шага новый круг ставится сам через заданное число месяцев. Напоминание приходит за N дней. Изменения схемы касаются новых кругов."],
   ["Ветклиника","Дневник приёмов по датам: зачем пришли, что сделали по факту, что назначили. «Следующий приём» сразу становится задачей с напоминанием за неделю."],
   ["Вес","Записываешь вес (можно в граммах: 4520). Зелёная полоса на графике — обычная зона, пунктир — обычный вес. Красная точка — вне зоны или скачок больше порога меньше чем за полтора месяца. Первый год (от дня рождения) — рост: серые точки без предупреждений. Если в «Задачах» есть задача «Взвесить…», она отметится сама."],
-  ["Питание","Корм, наполнитель и другое — периодами «с … по …». Начинаешь новый корм — прежний закрывается днём раньше. «Проверить до» — для назначенного на срок: за неделю придёт задача спросить врача."],
+  ["Питание","Корм, наполнитель и другое — периодами «с … по …». «По» пусто — значит сейчас. Начинаешь новый корм — прежний закрывается днём раньше. «Проверить до» — для назначенного на срок: за неделю придёт задача спросить врача."],
 ];
 function openHelp(){openModal(`<h2>Справка</h2><div class="help">${HELP.map(([t,x])=>`<details><summary>${t}</summary><p>${x}</p></details>`).join("")}</div>
   <div class="mact"><button class="btn" data-close>Закрыть</button></div>`,m=>m.classList.add("fixed"))}
 function openGear(){openModal(`<h2>Настройки</h2>
   <p class="meta" style="margin:0">${esc(user.email||"")}</p>
-  <div class="hint">Пуши на телефон включаются в «Задачах» (⚙ → «Уведомления»): все напоминания отсюда приходят оттуда.</div>
   <div class="btns"><button class="btn" id="imp">📁 Загрузить из файла</button><button class="btn" id="exp">💾 Скачать копию</button></div>
-  <p class="meta" style="margin:0">Файл готовит Claude: вес, приёмы у врача, корм, заметки — для питомца «${esc(P()?.name||"")}». Что уже есть, не задваивается.</p>
   <input type="file" id="impf" accept=".json,application/json" hidden>
   <div class="mact"><button class="btn left danger" id="out">Выйти</button><button class="btn" data-close>Закрыть</button></div>`,m=>{
   m.querySelector("#out").onclick=()=>{closeModal();sb.auth.signOut()};
