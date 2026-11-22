@@ -41,22 +41,35 @@ const sb=supabase.createClient(CONFIG.url,CONFIG.key);
 const TABLES=["p_pets","p_weights","p_periods","p_visits","p_notes","p_meds","p_schemes","p_runs","p_steps"];
 let S=null,user=null,tab=ls.get("tab","today"),petId=ls.get("pet",null),busy=0;
 const ok=r=>{if(r.error)throw r.error;return r.data};
+// база молча отдаёт не больше 1000 строк за запрос — берём порциями (как callAll в «Задачах»)
+const PAGE=1000;
+async function all(make){
+  const out=[];
+  for(let i=0;;i+=PAGE){const r=await make().range(i,i+PAGE-1);if(r.error)throw r.error;out.push(...r.data);if(r.data.length<PAGE)return out}
+}
 async function load(){
   try{
     const from=addDays(today(),-90);
-    const rs=await Promise.all([
-      ...TABLES.map(t=>sb.from(t).select("*")),
-      sb.from("tasks").select("*").not("pet","is",null),
-      sb.from("task_log").select("*").gte("day",from),
-      sb.from("sections").select("id,name,paused,space"),
+    const [rows,tasks,sections]=await Promise.all([
+      Promise.all(TABLES.map(t=>all(()=>sb.from(t).select("*").order("id")))),
+      all(()=>sb.from("tasks").select("*").not("pet","is",null).order("id")),
+      all(()=>sb.from("sections").select("id,name,paused,space").order("id")),
     ]);
-    const bad=rs.find(r=>r.error);if(bad)throw bad.error;
-    const d={};TABLES.forEach((t,i)=>d[t.slice(2)]=rs[i].data);
-    d.tasks=rs[TABLES.length].data;d.logs=rs[TABLES.length+1].data;d.sections=rs[TABLES.length+2].data;
+    // отметки — только задач питомцев (не всех задач), по 100 задач в запросе, чтобы адрес не был длинным
+    const ids=tasks.map(t=>t.id),parts=[];
+    for(let i=0;i<ids.length;i+=100)parts.push(ids.slice(i,i+100));
+    const logs=(await Promise.all(parts.map(p=>all(()=>sb.from("task_log").select("*").in("task_id",p).gte("day",from).order("id"))))).flat();
+    const d={};TABLES.forEach((t,i)=>d[t.slice(2)]=rows[i]);
+    d.tasks=tasks;d.logs=logs;d.sections=sections;
     S=d;render();
   }catch(e){
     console.error(e);
-    main.innerHTML=`<div class="empty"><b>База ещё не готова</b>Нужно один раз запустить в Supabase → SQL Editor сначала <code>016_early.sql</code> из «Задач», потом <code>001_pets.sql</code>.<br><small>${esc(e.message||"")}</small></div>`;
+    const m=String(e&&e.message||""),net=!navigator.onLine||/fetch|network|load failed/i.test(m);
+    const noDb=!net&&(e.code==="42P01"||e.code==="PGRST205"||/does not exist|schema cache/i.test(m));
+    if(S&&!noDb){toast(net?"Нет связи с базой — показано последнее загруженное":"Не удалось обновить: "+m);return}
+    main.innerHTML=noDb
+      ?`<div class="empty"><b>База ещё не готова</b>Нужно один раз запустить в Supabase → SQL Editor сначала <code>016_early.sql</code> из «Задач», потом <code>001_pets.sql</code>.<br><small>${esc(m)}</small></div>`
+      :`<div class="empty"><b>${net?"Нет связи с базой":"Не удалось загрузить"}</b>${net?"Проверь интернет.":`<small>${esc(m)}</small>`}<br><button class="btn pri" onclick="location.reload()">Повторить</button></div>`;
   }
 }
 // записать и перечитать всё: многое за нас меняют триггеры базы
