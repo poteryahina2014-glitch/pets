@@ -747,7 +747,9 @@ function openModal(html,init){
   const root=$("#modalRoot");
   root.innerHTML=`<div class="ov"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
   const ov=root.firstChild,m=ov.firstChild;
-  ov.addEventListener("click",e=>{if(e.target===ov||e.target.closest("[data-close]"))closeModal()});
+  // набрала что-то — щелчок мимо окна его не закрывает (терялся текст), Esc спрашивает
+  m.addEventListener("input",()=>m.dataset.dirty="1");
+  ov.addEventListener("click",e=>{if(e.target.closest("[data-close]")||(e.target===ov&&!m.dataset.dirty))closeModal()});
   document.addEventListener("keydown",escClose);
   init&&init(m);fitModal(m);return m;
 }
@@ -758,7 +760,13 @@ function fitModal(m){
   m.style.height="auto";
   m.style.height=Math.min(m.scrollHeight+2,innerHeight-12)+"px";
 }
-function escClose(e){if(e.key==="Escape")closeModal()}
+let checkLock=0;
+function escClose(e){
+  if(e.key!=="Escape")return;
+  const m=$("#modalRoot .modal");
+  if(m&&m.dataset.dirty&&!confirm("Закрыть без сохранения?"))return;
+  closeModal();
+}
 function closeModal(){$("#modalRoot").innerHTML="";document.removeEventListener("keydown",escClose)}
 function armDelete(btn,text,fn){btn.onclick=()=>{if(btn.dataset.armed){fn();return}btn.dataset.armed="1";btn.textContent=text;btn.classList.add("pri")}}
 let tt=null;
@@ -775,6 +783,8 @@ document.addEventListener("click",e=>{
   if(d.htab){hTab=d.htab;ls.set("htab",hTab);render();return}
   if(b.id==="help")return openHelp();
   if(b.id==="gear")return openGear();
+  // ✓ / снять: после отметки строка уезжает, и второй быстрый щелчок попадал в соседнюю задачу — 0,8 с ✓ не нажимается
+  if(d.done||d.undo){if(Date.now()<checkLock)return;checkLock=Date.now()+800}
   if(d.done){const t=byId(S.tasks,d.done);if(t)complete(t);return}
   if(d.undo){const t=byId(S.tasks,d.undo);if(t)undo(t);return}
   if(d.task){const t=byId(S.tasks,d.task);if(t)taskModal(t);return}
