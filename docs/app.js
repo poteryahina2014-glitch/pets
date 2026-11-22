@@ -693,9 +693,10 @@ const HELP=[
   ["Ветклиника","Дневник приёмов по датам: зачем пришли, что сделали по факту, что назначили. «Следующий приём» сразу становится задачей с напоминанием за неделю."],
   ["Вес","Записываешь вес (можно в граммах: 4520). Зелёная полоса на графике — обычная зона, пунктир — обычный вес. Красная точка — вне зоны или скачок больше порога меньше чем за полтора месяца. Первый год (от дня рождения) — рост: серые точки без предупреждений. Если в «Задачах» есть задача «Взвесить…», она отметится сама."],
   ["Питание","Корм, наполнитель и другое — периодами «с … по …». «По» пусто — значит сейчас. Начинаешь новый корм — прежний закрывается днём раньше. «Проверить до» — для назначенного на срок: за неделю придёт задача спросить врача."],
+  ["Версия","Номер версии — внизу этой справки (дата и время выкладки). Если приложение давно открыто, а на сайте вышла новая версия, вверху появится «Есть новая версия» — нажми «Обновить»."],
 ];
 function openHelp(){openModal(`<h2>Справка</h2><div class="help">${HELP.map(([t,x])=>`<details><summary>${t}</summary><p>${x}</p></details>`).join("")}</div>
-  <div class="mact"><button class="btn" data-close>Закрыть</button></div>`,m=>m.classList.add("fixed"))}
+  <div class="mact"><span class="left ver">${verText()}</span><button class="btn" data-close>Закрыть</button></div>`,m=>m.classList.add("fixed"))}
 function openGear(){openModal(`<h2>Настройки</h2>
   <p class="meta" style="margin:0">${esc(user.email||"")}</p>
   <div class="btns"><button class="btn" id="imp">📁 Загрузить из файла</button><button class="btn" id="exp">💾 Скачать копию</button></div>
@@ -816,3 +817,20 @@ document.addEventListener("mouseover",e=>{const b=e.target.closest("[aria-label]
 
 if("serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").catch(()=>{});
 })();
+
+// Версия на экране и сверка с сайтом (ревизия 22.11.2026). Номер — в version.js: каждая выкладка ставит новый
+// (крючок перед коммитом не пустит изменение docs/ без него). На сайте новее — полоска «Есть новая версия».
+const verText=()=>"Версия "+(window.APP_VERSION||"?");
+async function checkVersion(){
+  if(!window.APP_VERSION||document.getElementById("updBar"))return;
+  try{
+    const m=(await (await fetch("version.js",{cache:"no-cache"})).text()).match(/APP_VERSION\s*=\s*"([^"]+)"/);
+    if(!m||m[1]===window.APP_VERSION)return;
+    const b=document.createElement("div");b.id="updBar";b.className="upd-bar";
+    b.innerHTML='Есть новая версия <button type="button">Обновить</button>';
+    b.querySelector("button").onclick=()=>location.reload();
+    document.body.appendChild(b);
+  }catch(e){}
+}
+checkVersion();
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")checkVersion()});

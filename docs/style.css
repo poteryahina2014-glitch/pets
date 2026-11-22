@@ -196,3 +196,8 @@ details.past[open]>summary{margin-bottom:8px}
   .tabs{max-width:720px}
   .seg{max-width:620px}
 }
+
+/* Версия в справке и полоска «Есть новая версия» (поверх, ничего не сдвигает) */
+.ver{font-size:12px;opacity:.6;align-self:center}
+.upd-bar{position:fixed;top:calc(8px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:9999;display:flex;gap:10px;align-items:center;padding:8px 10px 8px 14px;border-radius:12px;background:var(--accent,#7a5cff);color:#fff;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap}
+.upd-bar button{border:0;border-radius:8px;padding:6px 10px;font:inherit;font-weight:600;background:#fff;color:#222;cursor:pointer}
