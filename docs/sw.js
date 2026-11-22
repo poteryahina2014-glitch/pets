@@ -1,7 +1,7 @@
 // Нужен, чтобы приложение устанавливалось на телефон и открывалось без интернета (список — из последней загрузки страницы).
 // Свои файлы — сначала из сети, мимо кэша браузера (GitHub Pages кэширует на 10 минут), без сети — из кэша.
 // Запросы к Supabase не трогаем.
-const CACHE = 'pets-v1';
+const CACHE = 'pets-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.json', 'icons/icon-192.png',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.76.1/dist/umd/supabase.js'];
 
