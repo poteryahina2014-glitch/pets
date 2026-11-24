@@ -2,7 +2,7 @@
 // Свои файлы — сначала из сети, мимо кэша браузера (GitHub Pages кэширует на 10 минут), без сети — из кэша.
 // Запросы к Supabase не трогаем.
 const CACHE = 'pets-v4';
-const SHELL = ['./', 'index.html', 'style.css', 'use.js', 'app.js', 'config.js', 'version.js', 'manifest.json', 'icons/icon-192.png',
+const SHELL = ['./', 'index.html', 'style.css', 'errlog.js', 'use.js', 'app.js', 'config.js', 'version.js', 'manifest.json', 'icons/icon-192.png',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.76.1/dist/umd/supabase.js'];
 
 self.addEventListener('install', e => {
