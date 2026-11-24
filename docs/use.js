@@ -6,7 +6,7 @@ const {esc,fmt,today,addDays,daysBetween,plural,dueBadge,mine,P,openModal,closeM
 const BASE={food:{name:"Корм",icon:"🥣"},litter:{name:"Наполнитель",icon:"🪣"}};
 const blocks=()=>mine(c.S().blocks).sort((a,b)=>(a.ord||0)-(b.ord||0)||a.created_at.localeCompare(b.created_at));
 const blockOf=x=>c.S().blocks.find(b=>b.id===x.block_id);
-const groupName=x=>BASE[x.type]?BASE[x.type]:(b=>b?{name:b.name,icon:b.icon||"📦"}:{name:"Без блока",icon:"📦"})(blockOf(x));
+const groupName=x=>BASE[x.type]?BASE[x.type]:(b=>b?{name:b.name,icon:esc(b.icon||"📦")}:{name:"Без блока",icon:"📦"})(blockOf(x));
 
 /* ---------- картинки: грузятся один раз, по надобности ---------- */
 const pics=new Map();let picBusy=false;
@@ -47,7 +47,7 @@ function shrink(file){
 /* ---------- экран ---------- */
 function render(main){
   const ps=mine(c.S().periods),t0=today();
-  const groups=[{type:"food",...BASE.food},{type:"litter",...BASE.litter},...blocks().map(b=>({type:"other",block:b,name:b.name,icon:b.icon||"📦"}))];
+  const groups=[{type:"food",...BASE.food},{type:"litter",...BASE.litter},...blocks().map(b=>({type:"other",block:b,name:b.name,icon:esc(b.icon||"📦")}))];
   if(ps.some(x=>x.type==="other"&&!blockOf(x)))groups.push({type:"other",block:null,name:"Без блока",icon:"📦"});
   let h="";
   for(const g of groups){
