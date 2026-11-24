@@ -4,7 +4,7 @@
   --accent:#2f7d6b; --accent-ink:#ffffff; --accent-soft:#dcefe8;
   --warn:#d99a0b; --warn-bg:#fff4d6; --warn-ink:#6b4a00;
   --ok:#2d7a4c; --ok-bg:#e3f1e7;
-  --danger:#d0302a; --danger-bg:#fde5e2;
+  --danger:#d0302a; --danger-ink:#ffffff; --danger-bg:#fde5e2;
   --shadow:0 1px 2px rgba(10,30,25,.06),0 4px 14px rgba(10,30,25,.06);
   --f-display:"Unbounded","Manrope",system-ui,sans-serif;
   --f-body:"Manrope",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -15,14 +15,14 @@
   --accent:#6cc5ae; --accent-ink:#0b1714; --accent-soft:#1d3a32;
   --warn:#f0bd45; --warn-bg:#352b12; --warn-ink:#f6d68a;
   --ok:#5cbf86; --ok-bg:#1d3326;
-  --danger:#ff6b5e; --danger-bg:#3d1a17;
+  --danger:#ff6b5e; --danger-ink:#2a0805; --danger-bg:#3d1a17;
   --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0f1513; --surface:#17201d; --surface-2:#1d2824; --ink:#e3efea; --muted:#94a8a0; --line:#2b3934;
   --accent:#6cc5ae; --accent-ink:#0b1714; --accent-soft:#1d3a32;
   --warn:#f0bd45; --warn-bg:#352b12; --warn-ink:#f6d68a;
   --ok:#5cbf86; --ok-bg:#1d3326;
-  --danger:#ff6b5e; --danger-bg:#3d1a17;
+  --danger:#ff6b5e; --danger-ink:#2a0805; --danger-bg:#3d1a17;
   --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}
 
 *{box-sizing:border-box}
@@ -194,8 +194,36 @@ details.past[open]>summary{margin-bottom:8px}
   .list.wl .row{border-left:1px solid var(--line);margin-left:-1px}
   .list.wl .row:nth-child(-n+3){border-top:0}
   .tabs{max-width:720px}
-  .seg{max-width:620px}
+  .seg{max-width:760px}
 }
+
+/* ветклиника и прививки строками */
+.vrow,.vx{display:grid;gap:4px 18px;padding:11px 14px;border:0;border-top:1px solid var(--line);width:100%;background:none;text-align:left}
+.vrow{grid-template-columns:130px 250px minmax(0,1fr)}
+.vx{grid-template-columns:130px 1fr 1fr 1fr}
+.vrow:first-child,.vx:first-child{border-top:0}
+button.vrow:hover,button.vx:hover{background:var(--surface-2)}
+.vrow>*,.vx>*{min-width:0;overflow-wrap:anywhere}
+.vrow .d{display:block;font-weight:700;font-variant-numeric:tabular-nums}
+.vrow .meta{display:block}
+.vt>span{display:block;margin-bottom:3px;white-space:pre-wrap}
+.vt i{font-style:normal;font-weight:600;color:var(--muted);margin-right:6px}
+.vx.h{color:var(--muted);font-size:12.5px;font-weight:600;padding-block:7px}
+@media (max-width:760px){.vrow{grid-template-columns:1fr}.vx{grid-template-columns:1fr 1fr}.vx.h{display:none}.vx b,.vx .meta{grid-column:1/-1}.vx [data-l]::before{content:attr(data-l);display:block;font-size:12px;color:var(--muted)}}
+.step [data-step]{cursor:pointer}
+
+/* что используем */
+.pic{width:56px;height:56px;flex:none;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;font-size:27px;overflow:hidden;padding:0}
+.pic img{width:100%;height:100%;object-fit:contain;background:#fff}
+.row.it{align-items:flex-start}
+.row .bd{display:flex;flex-direction:column;gap:4px;align-items:flex-end}
+.sh .sn{min-width:0;overflow-wrap:anywhere}
+.picrow{display:flex;gap:12px}.picbox{display:flex;flex-direction:column;gap:2px;align-items:center}.picf{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.big-pic{width:104px;height:104px;font-size:44px}
+.blk{display:grid;grid-template-columns:90px 1fr;gap:10px}
+.small{font-size:13px;min-height:20px}
+.optl{display:flex;gap:10px;align-items:center;padding:4px 0}
+.btn.danger.armed{background:var(--danger);border-color:var(--danger);color:var(--danger-ink)}
 
 /* Версия в справке и полоска «Есть новая версия» (поверх, ничего не сдвигает) */
 .ver{font-size:12px;opacity:.6;align-self:center}

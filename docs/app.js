@@ -8,7 +8,7 @@ const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 const ls={get(k,d){try{const v=localStorage.getItem("pets:"+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem("pets:"+k,JSON.stringify(v))}catch(e){}}};
 const KINDS={cat:{icon:"🐱",name:"Кот",def:"Котик"},bird:{icon:"🦜",name:"Птица",def:"Попугай"}};
 const UNITS=["табл.","г","мл","капли","шт.","пипетка"];
-const PTYPES={food:{name:"Корм",icon:"🥣"},litter:{name:"Наполнитель",icon:"🪣"},other:{name:"Другое",icon:"📌"}};
+const PTYPES=["food","litter","other"];
 
 /* ---------- даты: строки 'YYYY-MM-DD' в местном времени ---------- */
 const pad=n=>String(n).padStart(2,"0");
@@ -38,7 +38,7 @@ function dueBadge(d,soonDays){
 
 /* ---------- база ---------- */
 const sb=supabase.createClient(CONFIG.url,CONFIG.key);
-const TABLES=["p_pets","p_weights","p_periods","p_visits","p_notes","p_meds","p_schemes","p_runs","p_steps"];
+const TABLES=["p_pets","p_weights","p_periods","p_visits","p_notes","p_meds","p_schemes","p_runs","p_steps","p_blocks"];
 let S=null,user=null,tab=ls.get("tab","today"),petId=ls.get("pet",null),busy=0;
 const ok=r=>{if(r.error)throw r.error;return r.data};
 // база молча отдаёт не больше 1000 строк за запрос — берём порциями (как callAll в «Задачах»)
@@ -61,15 +61,15 @@ async function load(){
     const logs=(await Promise.all(parts.map(p=>all(()=>sb.from("task_log").select("*").in("task_id",p).gte("day",from).order("id"))))).flat();
     const d={};TABLES.forEach((t,i)=>d[t.slice(2)]=rows[i]);
     d.tasks=tasks;d.logs=logs;d.sections=sections;
-    S=d;render();
+    S=d;render();return true;
   }catch(e){
     console.error(e);
     const m=String(e&&e.message||""),net=!navigator.onLine||/fetch|network|load failed/i.test(m);
     const noDb=!net&&(e.code==="42P01"||e.code==="PGRST205"||/does not exist|schema cache/i.test(m));
     if(S&&!noDb){toast(net?"Нет связи с базой — показано последнее загруженное":"Не удалось обновить: "+m);return}
     main.innerHTML=noDb
-      ?`<div class="empty"><b>База ещё не готова</b>Нужно один раз запустить в Supabase → SQL Editor сначала <code>016_early.sql</code> из «Задач», потом <code>001_pets.sql</code>.<br><small>${esc(m)}</small></div>`
-      :`<div class="empty"><b>${net?"Нет связи с базой":"Не удалось загрузить"}</b>${net?"Проверь интернет.":`<small>${esc(m)}</small>`}<br><button class="btn pri" onclick="location.reload()">Повторить</button></div>`;
+      ?`<div class="empty"><b>База ещё не готова</b>Нужно один раз запустить в Supabase → SQL Editor сначала <code>016_early.sql</code> из «Задач», потом <code>001_pets.sql</code> и <code>003_use.sql</code> отсюда.<br><small>${esc(m)}</small></div>`
+      :`<div class="empty"><b>${net?"Нет связи с базой":"Не удалось загрузить"}</b>${net?"Проверь интернет.":`<small>${esc(m)}</small>`}<br><button class="btn pri" data-act="retry">Повторить</button></div>`;
   }
 }
 // записать и перечитать всё: многое за нас меняют триггеры базы
@@ -130,7 +130,8 @@ function owners(){
   const m=new Map();
   for(const x of S.meds)for(const id of x.task_ids||[])m.set(id,{type:"med",x});
   for(const x of S.steps)if(x.task_id)m.set(x.task_id,{type:"step",x});
-  for(const x of S.visits)if(x.task_id)m.set(x.task_id,{type:"visit",x});
+  for(const x of S.visits){if(x.task_id)m.set(x.task_id,{type:"visit",x});if(x.prep_task)m.set(x.prep_task,{type:"prep",x})}
+  for(const x of S.runs)if(x.prep_task)m.set(x.prep_task,{type:"preprun",x});
   for(const x of S.periods)if(x.task_id)m.set(x.task_id,{type:"period",x});
   for(const x of S.pets)if(x.bday_task)m.set(x.bday_task,{type:"bday",x});
   return m;
@@ -197,7 +198,7 @@ async function syncName(kind,name){
 /* ===== Сегодня ===== */
 function taskRow(t,own,opts={}){
   const o=own.get(t.id);
-  const icon=o?{med:"💊",step:"💉",visit:"🏥",period:"🥣",bday:"🎂"}[o.type]:isDaily(t)?"🧽":"🔔";
+  const icon=o?{med:"💊",step:"💉",visit:"🏥",prep:"📞",preprun:"📞",period:"🥣",bday:"🎂"}[o.type]:isDaily(t)?"🧽":"🔔";
   const meta=[repeatLabel(t),t.remind_at?"🔔 "+t.remind_at.slice(0,5):""].filter(Boolean).join(" · ");
   const done=opts.done;
   return `<div class="row${done?" done":""}"><button class="ck${done?" on":""}" data-${done?"undo":"done"}="${t.id}" aria-label="${done?"Снять отметку":"Сделано"}">✓</button>
@@ -264,7 +265,9 @@ function taskModal(t){
 }
 // задача из лекарства / схемы / приёма: тут только отметить, остальное — в своём разделе
 function ownedModal(t,o){
-  const where={med:"Здоровье → Лекарства",step:"Здоровье → Процедуры",visit:"Здоровье → Ветклиника",period:"Питание"}[o.type];
+  const vax=o.type==="step"||o.type==="preprun"?isVax(S.schemes.find(sc=>sc.id===(o.type==="step"?S.runs.find(r=>r.id===o.x.run_id):o.x)?.scheme_id)):false;
+  const proc=vax?"Здоровье → Прививки":"Здоровье → Процедуры и лекарства";
+  const where={med:"Здоровье → Процедуры и лекарства",step:proc,preprun:proc,visit:"Здоровье → Ветклиника",prep:"Здоровье → Ветклиника",period:"Что используем"}[o.type];
   const ll=lastLog(t.id);
   openModal(`<h2>${esc(t.title)}</h2>
     <dl class="kv"><dt>Срок</dt><dd>${t.due_date?fmt(t.due_date):"—"}${t.done_on?" · сделано "+fmt(t.done_on):""}</dd>${t.repeat_unit?`<dt>Повтор</dt><dd>${esc(repeatLabel(t))}${t.repeat_until?" по "+fmt(t.repeat_until):""}</dd>`:""}</dl>
@@ -277,10 +280,25 @@ function ownedModal(t,o){
 }
 
 /* ===== Здоровье ===== */
-let hTab=ls.get("htab","proc");
+let hTab=ls.get("htab","vet");
+// схемы прививок живут на «Прививках», остальные — на «Процедурах и лекарствах»
+const isVax=sc=>!!sc&&/вакцин|привив/i.test(sc.name+" "+(sc.steps||[]).map(x=>x.t).join(" "));
+// вкладка скрыта, пока не включена в ⚙; идёт курс лекарства — видна сама, чтобы он не потерялся
+const procShown=()=>!!P().show_proc||mine(S.meds).some(x=>(x.stopped_on||x.end_on)>=today());
 function renderHealth(){
-  const seg=`<div class="seg">${[["proc","💉 Процедуры"],["meds","💊 Лекарства"],["vet","🏥 Ветклиника"]].map(([k,v])=>`<button data-htab="${k}" aria-pressed="${k===hTab}">${v}</button>`).join("")}</div>`;
-  main.innerHTML=seg+({proc:procHTML,meds:medsHTML,vet:vetHTML}[hTab]||procHTML)();
+  const tabs=[["vet","🏥 Ветклиника"],["vax","💉 Прививки"]];
+  if(procShown())tabs.push(["pr","💊 Процедуры и лекарства"]);
+  const cur=tabs.some(t=>t[0]===hTab)?hTab:"vet";
+  main.innerHTML=`<div class="seg">${tabs.map(([k,v])=>`<button data-htab="${k}" aria-pressed="${k===cur}">${v}</button>`).join("")}</div>`+{vet:vetHTML,vax:vaxHTML,pr:prHTML}[cur]();
+}
+function vaxHTML(){
+  const vs=mine(S.visits).filter(x=>x.vax_complex||x.vax_rabies||/привив|вакцин/i.test(x.reason||"")&&!/рекоменд|назнач|подготов|узнать/i.test(x.reason||"")).sort((a,b)=>b.day.localeCompare(a.day));
+  let h=`<button class="add" data-act="newvax">＋ Прививка</button>`;
+  h+=vs.length?`<div class="list"><div class="vx h"><span>Дата</span><span>Комплексная</span><span>Бешенство</span><span>Клиника</span></div>${vs.map(x=>`<button class="vx" data-visit="${x.id}"><b>${fmt(x.day)}</b><span data-l="Комплексная">${esc(x.vax_complex||"—")}</span><span data-l="Бешенство">${esc(x.vax_rabies||"—")}</span><span class="meta">${esc(x.clinic||"")}</span></button>`).join("")}</div>`:`<div class="empty">Прививок пока нет</div>`;
+  return h+`<section class="sec"><h2>Подготовка к прививке</h2>${schemesHTML(isVax)}</section>`;
+}
+function prHTML(){
+  return `<section class="sec"><h2>💊 Лекарства</h2>${medsHTML()}</section><section class="sec"><h2>🔁 Схемы процедур</h2>${schemesHTML(sc=>!isVax(sc))}</section>`;
 }
 
 /* --- схемы процедур --- */
@@ -293,16 +311,16 @@ function stepHTML(s,sc){
   const n=due?daysBetween(today(),due):null;
   const cls=s.done_on?"done":n!==null&&n<0?"late":n!==null&&n<=(sc?.remind_days??7)?"soon":"";
   return `<div class="step ${cls}"><button class="dot" data-step="${s.id}" aria-label="${s.done_on?"Сделано":"Отметить"}">${s.done_on?"✓":s.idx+1}</button>
-    <span class="tx"><span class="nm">${esc(s.title)}</span><span class="meta">${s.done_on?"сделано "+fmt(s.done_on):(s.gap&&s.idx?`через ${plural(s.gap,"день","дня","дней")} после предыдущего · `:"")+(due?"до "+fmt(due):"")}${!s.task_id&&!s.done_on?" · задачи нет":""}</span></span>
+    <span class="tx" data-step="${s.id}"><span class="nm">${esc(s.title)}</span><span class="meta">${s.done_on?"сделано "+fmt(s.done_on):(s.gap&&s.idx?`через ${plural(s.gap,"день","дня","дней")} после предыдущего · `:"")+(due?"до "+fmt(due):"")}${!s.task_id&&!s.done_on?" · задачи нет":""}</span></span>
     ${s.done_on?"":dueBadge(due,sc?.remind_days??7)}</div>`;
 }
-function procHTML(){
-  const scs=mine(S.schemes).sort((a,b)=>(a.ord||0)-(b.ord||0)||a.created_at.localeCompare(b.created_at));
+function schemesHTML(which){
+  const scs=mine(S.schemes).filter(which).sort((a,b)=>(a.ord||0)-(b.ord||0)||a.created_at.localeCompare(b.created_at));
   let h=``;
   h+=`<div class="cards">`;
   for(const sc of scs){
     const rs=runsOf(sc),cur=rs.find(r=>!runDone(r))||null,past=rs.filter(r=>r!==cur);
-    h+=`<div class="card"><div class="ch"><span class="tx"><h3>${esc(sc.name)}</h3><span class="meta">${(sc.steps||[]).length} шаг. ${sc.repeat_months?"· круг каждые "+sc.repeat_months+" мес.":""} · напомнить за ${sc.remind_days} дн.</span></span>
+    h+=`<div class="card"><div class="ch"><span class="tx"><h3>${esc(sc.name)}</h3><span class="meta">${(sc.steps||[]).length} шаг. ${sc.repeat_months?"· круг каждые "+sc.repeat_months+" мес.":""} · напомнить за ${sc.remind_days} дн.${sc.prep_days?" · записаться за "+sc.prep_days+" дн.":""}</span></span>
       <button class="icon" data-scheme="${sc.id}" aria-label="Изменить схему">✎</button></div>
       ${cur?`<div class="steps">${stepsOf(cur).map(s=>stepHTML(s,sc)).join("")}</div>
         <div class="btns"><button class="btn sm ghost" data-runmove="${cur.id}">Сдвинуть начало (${fmtShort(cur.start_on)})</button><button class="btn sm ghost danger" data-rundel="${cur.id}">Убрать этот круг</button></div>`
@@ -310,17 +328,18 @@ function procHTML(){
       ${past.length?`<details class="past"><summary>История: ${plural(past.length,"круг","круга","кругов")}</summary>${past.map(r=>`<div class="meta" style="margin-bottom:6px"><b>${fmt(r.start_on)}</b>: ${stepsOf(r).map(s=>esc(s.title)+" — "+(s.done_on?fmtShort(s.done_on):"не сделано")).join("; ")}</div>`).join("")}</details>`:""}
     </div>`;
   }
-  h+=`</div><button class="add" data-act="newscheme">＋ Новая схема</button>`;
+  h+=`</div><button class="add" data-act="${which===isVax?"newvaxscheme":"newscheme"}">＋ Новая схема</button>`;
   return h;
 }
-function schemeModal(sc){
-  const e=sc?{...sc,steps:(sc.steps||[]).map(s=>({...s}))}:{name:"Вакцинация",steps:[{t:"От блох",gap:0},{t:"От глистов",gap:""},{t:"Прививка",gap:""}],repeat_months:12,remind_days:7};
+function schemeModal(sc,vax){
+  const e=sc?{...sc,steps:(sc.steps||[]).map(s=>({...s}))}:vax?{name:"Вакцинация",steps:[{t:"От блох",gap:0},{t:"От глистов",gap:""},{t:"Прививка",gap:""}],repeat_months:12,remind_days:7,prep_days:30}:{name:"",steps:[{t:"",gap:0}],repeat_months:"",remind_days:7,prep_days:0};
   openModal(`<h2>${sc?"Схема":"Новая схема"}</h2>
     <div class="fld"><label for="sn">Название</label><input id="sn" value="${esc(e.name)}"></div>
-    <div class="fld"><span class="lb">Шаги (через сколько дней после предыдущего)</span><div id="srows" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div class="fld"><span class="lb">Шаги</span><div id="srows" style="display:flex;flex-direction:column;gap:6px"></div>
       <button class="add" id="sadd">＋ Шаг</button></div>
-    <div class="grid2"><div class="fld"><label for="sm">Повторять круг каждые, мес.</label><input id="sm" type="number" min="0" max="60" placeholder="не повторять" value="${e.repeat_months||""}"></div>
-      <div class="fld"><label for="sr">Напомнить за, дней</label><input id="sr" type="number" min="0" max="60" value="${e.remind_days??7}"></div></div>
+    <div class="grid3"><div class="fld"><label for="sm">Новый круг через, мес.</label><input id="sm" type="number" min="0" max="60" placeholder="не повторять" value="${e.repeat_months||""}"></div>
+      <div class="fld"><label for="sr">Напомнить за, дней</label><input id="sr" type="number" min="0" max="60" value="${e.remind_days??7}"></div>
+      <div class="fld"><label for="sp">Записаться за, дней</label><input id="sp" type="number" min="0" max="180" placeholder="—" value="${e.prep_days||""}"></div></div>
     <div class="mact">${sc?`<button class="btn danger left" id="sdel">Удалить</button>`:""}<button class="btn" data-close>Отмена</button><button class="btn pri" id="ssave">Сохранить</button></div>`,m=>{
     m.classList.add("fixed");
     const rows=m.querySelector("#srows");
@@ -336,14 +355,15 @@ function schemeModal(sc){
       const steps=e.steps.filter(s=>String(s.t).trim()).map((s,i)=>({t:String(s.t).trim(),gap:i?Math.round(num(s.gap)??-1):0}));
       if(!steps.length)return toast("Нужен хотя бы один шаг");
       if(steps.some(s=>s.gap<0))return toast("Укажи у каждого шага, через сколько дней");
-      const row={name,steps,repeat_months:Math.round(num(m.querySelector("#sm").value)||0)||null,remind_days:Math.max(0,Math.round(num(m.querySelector("#sr").value)??7))};
+      const row={name,steps,repeat_months:Math.round(num(m.querySelector("#sm").value)||0)||null,remind_days:Math.max(0,Math.round(num(m.querySelector("#sr").value)??7)),prep_days:prepDays(m.querySelector("#sp").value)};
       closeModal();
       save(sc?upd("p_schemes",sc.id,row):ins("p_schemes",{...row,pet_id:P().id}),"Схема сохранена");
     };
   });
 }
-function dateAsk(title,def,fn,extra=""){
-  openModal(`<h2>${title}</h2><div class="fld"><label for="dq">Дата</label><input id="dq" type="date" value="${def}"></div>${extra}
+const prepDays=v=>Math.min(180,Math.max(0,Math.round(num(v)||0)));
+function dateAsk(title,def,fn,label="Дата"){
+  openModal(`<h2>${title}</h2><div class="fld"><label for="dq">${label}</label><input id="dq" type="date" value="${def}"></div>
     <div class="mact"><button class="btn" data-close>Отмена</button><button class="btn pri" id="dok">OK</button></div>`,m=>{
     m.querySelector("#dok").onclick=()=>{const v=m.querySelector("#dq").value;if(!v)return;closeModal();fn(v)};
   });
@@ -360,7 +380,7 @@ function stepClick(id){
     });
     return;
   }
-  dateAsk("✓ "+esc(s.title),today(),day=>{if(t)complete(t,day);else save(upd("p_steps",s.id,{done_on:day}),"Отмечено ✓")},`<p class="meta" style="margin:0">Когда сделано — от этой даты посчитается следующий шаг.</p>`);
+  dateAsk("✓ "+esc(s.title),today(),day=>{if(t)complete(t,day);else save(upd("p_steps",s.id,{done_on:day}),"Отмечено ✓")},"Когда сделано");
 }
 
 /* --- лекарства --- */
@@ -383,7 +403,7 @@ function medHTML(x,active){
     <span class="meta">${fmt(x.start_on)} — ${fmt(until)}${x.stopped_on?" (закончили раньше)":""}${x.reason?" · "+esc(x.reason):""}</span></span>
     <button class="icon" data-med="${x.id}" aria-label="Изменить">✎</button></div>
     <div class="calc"><div><b>${c.days}</b><span>${plural(c.days,"день","дня","дней").replace(/^\d+ /,"")} курса</span></div><div><b>${c.doses}</b><span>приёмов</span></div><div><b>${n2(c.total)}</b><span>${esc(x.unit)} всего</span></div></div>
-    ${active?`<div class="bar" title="дано ${given} из ${c.doses}"><i style="width:${pct}%"></i></div><span class="meta">Дано ${given} из ${c.doses} (отметки за последние 90 дней)</span>`:""}
+    ${active?`<div class="bar" title="дано ${given} из ${c.doses}"><i style="width:${pct}%"></i></div><span class="meta">Дано ${given} из ${c.doses}</span>`:""}
     ${active?`<div class="btns"><button class="btn sm ghost" data-medstop="${x.id}">⏹ Закончить сегодня</button></div>`:""}</div>`;
 }
 function medsHTML(){
@@ -404,8 +424,9 @@ function medModal(x){
       <div class="fld"><label for="mu">В чём</label><input id="mu" list="units" value="${esc(e.unit)}"><datalist id="units">${UNITS.map(u=>`<option value="${u}">`).join("")}</datalist></div>
       <div class="fld"><label for="mt">Раз в день</label><input id="mt" type="number" min="1" max="6" value="${e.times.length}"></div></div>
     <div class="fld"><span class="lb">Во сколько (напоминание)</span><div class="times" id="mtimes"></div></div>
-    <div class="grid3"><div class="fld"><label for="ms">Давать с</label><input id="ms" type="date" value="${e.start_on}"></div>
-      <div class="fld"><label for="me">По (вкл.)</label><input id="me" type="date" value="${e.end_on}"></div>
+    <div class="grid2"><div class="fld"><label for="ms">Давать с</label><input id="ms" type="date" value="${e.start_on}"></div>
+      <div class="fld"><label for="mdn">На сколько дней</label><input id="mdn" type="number" min="1" max="730" value="${daysBetween(e.start_on,e.end_on)+1}"></div>
+      <div class="fld"><label for="me">По включительно</label><input id="me" type="date" value="${e.end_on}"></div>
       <div class="fld"><label for="mev">Раз в, дней</label><input id="mev" type="number" min="1" max="60" value="${e.every_days}"></div></div>
     <div class="calc" id="mcalc"></div>
     <div class="fld"><label for="mr">Зачем / кто назначил</label><input id="mr" value="${esc(e.reason||"")}"></div>
@@ -425,7 +446,13 @@ function medModal(x){
       m.querySelector("#mcalc").innerHTML=`<div><b>${c.days}</b><span>дней курса</span></div><div><b>${c.doses}</b><span>приёмов</span></div><div><b>${n2(c.total)}</b><span>${esc(v("#mu")||"")} всего</span></div>`;
     };
     m.querySelector("#mt").oninput=()=>{drawTimes();calc()};
-    ["#ma","#mu","#ms","#me","#mev"].forEach(id=>m.querySelector(id).oninput=calc);
+    const days=()=>Math.round(num(v("#mdn"))||0);
+    const toEnd=()=>{if(v("#ms")&&days()>0)m.querySelector("#me").value=addDays(v("#ms"),days()-1);calc()};
+    m.querySelector("#ms").oninput=m.querySelector("#mdn").oninput=toEnd;
+    m.querySelector("#me").oninput=()=>{const n=v("#ms")&&v("#me")?daysBetween(v("#ms"),v("#me"))+1:0;if(n>0)m.querySelector("#mdn").value=n;calc()};
+    ["#ma","#mu","#mev"].forEach(id=>m.querySelector(id).oninput=calc);
+    // щелчок по числу выделяет его целиком: иначе «0,3» дописывалось к «1»
+    ["#ma","#mt","#mdn","#mev"].forEach(id=>m.querySelector(id).addEventListener("focus",ev=>setTimeout(()=>ev.target.select(),0)));
     drawTimes();calc();
     if(x)armDelete(m.querySelector("#mdel"),"Удалить курс и его историю?",()=>{closeModal();save(rm("p_meds",x.id),"Удалено")});
     m.querySelector("#msave").onclick=()=>{
@@ -444,31 +471,41 @@ function medModal(x){
 /* --- ветклиника --- */
 function vetHTML(){
   const vs=mine(S.visits).sort((a,b)=>b.day.localeCompare(a.day));
-  let h=`<button class="add" data-act="newvisit">＋ Приём</button>`;
+  let h=`<button class="add" data-act="newvisit">＋ Приём</button>`,y="";
   if(!vs.length)return h+`<div class="empty">Дневник пуст</div>`;
-  h+=`<div class="cards">`+vs.map(x=>`<div class="card"><div class="ch"><span class="ic" style="font-size:22px">🏥</span><span class="tx"><h3>${fmt(x.day)} — ${esc(x.reason||"приём")}</h3>${x.clinic?`<span class="meta">${esc(x.clinic)}</span>`:""}</span>
-    <button class="icon" data-visit="${x.id}" aria-label="Изменить">✎</button></div>
-    ${x.done||x.prescribed||x.next_on||x.note?`<dl class="kv">${x.done?`<dt>Сделали</dt><dd>${esc(x.done)}</dd>`:""}${x.prescribed?`<dt>Назначили</dt><dd>${esc(x.prescribed)}</dd>`:""}${x.next_on?`<dt>Следующий</dt><dd>${fmt(x.next_on)}${x.next_why?" — "+esc(x.next_why):""} ${x.next_on>=today()?dueBadge(x.next_on,7):""}</dd>`:""}${x.note?`<dt>Заметка</dt><dd>${esc(x.note)}</dd>`:""}</dl>`:""}</div>`).join("")+`</div>`;
-  return h;
+  for(const x of vs){
+    const yy=x.day.slice(0,4);
+    if(yy!==y){h+=`${y?"</div></section>":""}<section class="sec"><h2>${yy}</h2><div class="list">`;y=yy}
+    const n=x.next_on?daysBetween(today(),x.next_on):null;
+    h+=`<button class="vrow" data-visit="${x.id}"><span><span class="d">${fmt(x.day)}</span>${x.clinic?`<span class="meta">${esc(x.clinic)}</span>`:""}</span><span class="nm">${esc(x.reason||"приём")}</span>
+      <span class="vt">${x.done?`<span><i>Сделали</i>${esc(x.done)}</span>`:""}${x.prescribed?`<span><i>Назначили</i>${esc(x.prescribed)}</span>`:""}${x.next_on?`<span><i>Следующий</i>${fmt(x.next_on)}${x.next_why?" — "+esc(x.next_why):""} ${n>=0&&n<=14?dueBadge(x.next_on,14):""}</span>`:""}${x.note?`<span class="meta">${esc(x.note)}</span>`:""}</span></button>`;
+  }
+  return h+"</div></section>";
 }
-function visitModal(x){
+function visitModal(x,pre){
   const last=mine(S.visits).sort((a,b)=>b.day.localeCompare(a.day))[0];
-  const e=x||{day:today(),clinic:last?.clinic||"",reason:"",done:"",prescribed:"",next_on:"",next_why:"",note:""};
+  const e=x||{day:today(),clinic:last?.clinic||"",reason:"",done:"",prescribed:"",next_on:"",next_why:"",note:"",prep_days:30,...pre};
   openModal(`<h2>${x?"Приём":"Новый приём"}</h2>
     <div class="grid2"><div class="fld"><label for="vd">Дата</label><input id="vd" type="date" value="${e.day}"></div>
       <div class="fld"><label for="vc">Клиника, врач</label><input id="vc" value="${esc(e.clinic||"")}"></div></div>
     <div class="fld"><label for="vr">Зачем пришли</label><input id="vr" value="${esc(e.reason||"")}" placeholder="Прививка, анализ крови…"></div>
     <div class="fld"><label for="vdn">Что сделали по факту</label><textarea id="vdn">${esc(e.done||"")}</textarea></div>
     <div class="fld"><label for="vp">Что назначили</label><textarea id="vp">${esc(e.prescribed||"")}</textarea></div>
+    <div class="grid2"><div class="fld"><label for="vxc">Прививка комплексная</label><input id="vxc" value="${esc(e.vax_complex||"")}"></div>
+      <div class="fld"><label for="vxr">Прививка от бешенства</label><input id="vxr" value="${esc(e.vax_rabies||"")}"></div></div>
     <div class="grid2"><div class="fld"><label for="vn">Следующий приём</label><input id="vn" type="date" value="${e.next_on||""}"></div>
-      <div class="fld"><label for="vw">Зачем</label><input id="vw" value="${esc(e.next_why||"")}"></div></div>
+      <div class="fld"><label for="vpd">Записаться за, дней</label><input id="vpd" type="number" min="0" max="180" placeholder="—" value="${e.prep_days||""}"></div></div>
+    <div class="btns">${[["w2","через 2 недели"],["1","через месяц"],["6","через полгода"]].map(([k,t])=>`<button type="button" class="btn sm" data-next="${k}">${t}</button>`).join("")}</div>
+    <div class="fld"><label for="vw">Зачем следующий</label><input id="vw" value="${esc(e.next_why||"")}"></div>
     <div class="fld"><label for="vo">Заметка</label><textarea id="vo">${esc(e.note||"")}</textarea></div>
     <div class="mact">${x?`<button class="btn danger left" id="vdel">Удалить</button>`:""}<button class="btn" data-close>Отмена</button><button class="btn pri" id="vsave">Сохранить</button></div>`,m=>{
     m.classList.add("fixed");
     const v=id=>m.querySelector(id).value.trim()||null;
+    m.querySelectorAll("[data-next]").forEach(b=>b.onclick=()=>{const d=m.querySelector("#vd").value||today(),k=b.dataset.next;
+      m.querySelector("#vn").value=k==="w2"?addDays(d,14):addMonths(d,+k);m.dataset.dirty="1"});
     if(x)armDelete(m.querySelector("#vdel"),"Удалить запись?",()=>{closeModal();save(rm("p_visits",x.id),"Удалено")});
     m.querySelector("#vsave").onclick=()=>{
-      const row={day:v("#vd")||today(),clinic:v("#vc"),reason:v("#vr"),done:v("#vdn"),prescribed:v("#vp"),next_on:v("#vn"),next_why:v("#vw"),note:v("#vo")};
+      const row={day:v("#vd")||today(),clinic:v("#vc"),reason:v("#vr"),done:v("#vdn"),prescribed:v("#vp"),next_on:v("#vn"),next_why:v("#vw"),note:v("#vo"),vax_complex:v("#vxc"),vax_rabies:v("#vxr"),prep_days:prepDays(m.querySelector("#vpd").value)};
       closeModal();save(x?upd("p_visits",x.id,row):ins("p_visits",{...row,pet_id:P().id}),row.next_on?"Сохранено — следующий приём в «Задачах»":"Сохранено");
     };
   });
@@ -536,12 +573,19 @@ function renderWeight(){
   const p=P(),fl=wFlags(p,wOf()),last=fl[fl.length-1];
   let h=`<div class="card"><div class="ch"><span class="tx">${last?`<span class="big">${n2(last.kg)} кг</span><span class="meta">${fmt(last.w.day)}${last.d!==null?` · ${last.d>0?"+":""}${last.d} г с прошлого раза`:""}</span>`:`<span class="nm">Взвешиваний пока нет</span>`}</span>
     <button class="btn pri" data-act="newweight">＋ Взвесить</button></div>
-    ${last&&(last.out||last.jump)?`<div class="d-bad">⚠ ${last.out?"Вес вне обычной зоны ("+n2(+p.w_min)+"–"+n2(+p.w_max)+" кг)":"Вес резко изменился"} — стоит показать врачу.</div>`:""}
-    <span class="meta">${p.birthday?`До ${ADULT} месяцев (до ${fmt(addMonths(p.birthday,ADULT))}) — рост, серые точки, без предупреждений. `:""}Зелёная зона: ${p.w_min?n2(+p.w_min):"—"}–${p.w_max?n2(+p.w_max):"—"} кг, обычный вес ${p.w_norm?n2(+p.w_norm):"—"} кг, предупреждать при скачке больше ${p.w_jump||"—"} г за месяц (меняется в профиле).</span></div>`;
+    ${last&&(last.out||last.jump)?`<div class="d-bad">⚠ ${last.out?"Вес вне обычной зоны ("+n2(+p.w_min)+"–"+n2(+p.w_max)+" кг)":"Вес резко изменился"} — стоит показать врачу.</div>`:""}</div>`;
   if(fl.length)h+=`<div class="chart"><div class="seg" style="margin:0 4px 8px">${[["year","За год"],["all","За всё время"]].map(([k,v])=>`<button data-wrange="${k}" aria-pressed="${k===wRange}">${v}</button>`).join("")}</div>${chartSVG(p,fl)}</div>`;
   if(fl.length)h+=`<section class="sec"><h2>Все взвешивания</h2><div class="list wl">${[...fl].reverse().map(x=>`<button class="row" data-weight="${x.w.id}"><span class="tx"><span class="nm">${n2(x.kg)} кг</span><span class="meta">${fmt(x.w.day)}${x.w.note?" · "+esc(x.w.note):""}</span></span>
     ${x.d!==null?`<span class="${x.jump?"d-bad":x.d>0?"d-up":"meta"}">${x.d>0?"+":""}${x.d} г</span>`:""}${x.out?`<span class="badge b-late">вне зоны</span>`:""}${x.grow?`<span class="badge b-date">растёт</span>`:""}</button>`).join("")}</div></section>`;
   main.innerHTML=h;
+}
+function weightDoubt(row,w){
+  const out=[];
+  if(row.day>today())out.push("Дата в будущем: "+fmt(row.day));
+  const me={...row,id:"new",created_at:"9"},list=wOf().filter(x=>!w||x.id!==w.id).concat(me).sort((a,b)=>a.day.localeCompare(b.day)||a.created_at.localeCompare(b.created_at));
+  const fl=wFlags(P(),list),i=fl.findIndex(x=>x.w===me),f=fl[i],prev=fl[i-1];
+  if(prev&&(f.jump||Math.abs(f.d)>prev.kg*300&&!f.grow))out.push(`${f.d>0?"+":"−"}${Math.abs(f.d)} г с ${fmt(prev.w.day)} (было ${n2(prev.kg)} кг)`);
+  return out.join(" · ");
 }
 function weightModal(w){
   const e=w||{day:today(),kg:"",note:""};
@@ -549,13 +593,20 @@ function weightModal(w){
     <div class="grid2"><div class="fld"><label for="wd">Дата</label><input id="wd" type="date" value="${e.day}"></div>
       <div class="fld"><label for="wk">Вес, кг</label><input id="wk" inputmode="decimal" value="${e.kg?n2(+e.kg):""}" placeholder="4,5 или 4520"></div></div>
     <div class="fld"><label for="wn">Заметка</label><input id="wn" value="${esc(e.note||"")}"></div>
+    <div class="d-bad small" id="ww">&nbsp;</div>
     <div class="mact">${w?`<button class="btn danger left" id="wdel">Удалить</button>`:""}<button class="btn" data-close>Отмена</button><button class="btn pri" id="wsave">Сохранить</button></div>`,m=>{
     m.querySelector("#wk").focus();
     if(w)armDelete(m.querySelector("#wdel"),"Удалить?",()=>{closeModal();save(rm("p_weights",w.id),"Удалено")});
+    const sv=m.querySelector("#wsave");let asked="",askedAt=0;
+    ["#wd","#wk"].forEach(id=>m.querySelector(id).addEventListener("input",()=>{if(!asked)return;asked="";m.querySelector("#ww").textContent="\u00a0";sv.textContent="Сохранить"}));
     const go=()=>{
       let kg=num(m.querySelector("#wk").value);if(!kg)return m.querySelector("#wk").focus();
       if(kg>100)kg=kg/1000;   // ввели в граммах
       const row={day:m.querySelector("#wd").value||today(),kg,note:m.querySelector("#wn").value.trim()||null};
+      // странный вес или дата в будущем — спросить до записи, второе нажатие записывает
+      const why=weightDoubt(row,w);
+      if(why&&asked!==why){asked=why;askedAt=Date.now();m.querySelector("#ww").textContent=why;sv.textContent="Всё равно записать";return}
+      if(why&&Date.now()-askedAt<800)return;
       closeModal();
       if(w)return save(upd("p_weights",w.id,row),"Сохранено");
       // задачу «Взвесить …» в «Задачах» отмечаем сами
@@ -567,61 +618,10 @@ function weightModal(w){
   });
 }
 
-/* ===== Питание и быт ===== */
-function renderFood(){
-  const ps=mine(S.periods),t0=today();
-  let h="";
-  for(const [type,info] of Object.entries(PTYPES)){
-    const list=ps.filter(x=>x.type===type).sort((a,b)=>(b.start_on||"").localeCompare(a.start_on||""));
-    const cur=list.filter(x=>!x.end_on||x.end_on>=t0),past=list.filter(x=>!cur.includes(x));
-    h+=`<section class="sec"><div class="sh">${info.icon} ${info.name}<span class="sp"><button class="btn sm" data-newperiod="${type}">＋ ${type==="food"?"Новый корм":type==="litter"?"Новый наполнитель":"Добавить"}</button></span></div>`;
-    if(!list.length){h+=`<div class="empty">Пока не записано.</div></section>`;continue}
-    h+=`<div class="list">${cur.map(x=>periodRow(x,true)).join("")}${past.map(x=>periodRow(x,false)).join("")}</div>`;
-    if(list.length>1)h+=timeline(list);
-    h+=`</section>`;
-  }
-  main.innerHTML=`<div class="c3">${h}</div>`;
-}
-function periodRow(x,cur){
-  const len=x.start_on?daysBetween(x.start_on,x.end_on||today()):null;
-  const dur=len===null?"":len>=60?Math.round(len/30.4)+" мес.":plural(len,"день","дня","дней");
-  return `<button class="row" data-period="${x.id}"><span class="tx"><span class="nm">${esc(x.name)}</span>
-    <span class="meta">${x.start_on?"с "+fmt(x.start_on):""}${x.end_on?" по "+fmt(x.end_on):cur?" — сейчас":""}${dur?" · "+dur:""}${x.reason?" · "+esc(x.reason):""}</span>
-    ${x.check_on&&!x.end_on?`<span class="meta">Проверить до ${fmt(x.check_on)} (задача в «Задачах»)</span>`:""}</span>
-    ${cur?`<span class="badge b-ok">сейчас</span>`:""}${x.check_on&&!x.end_on?dueBadge(x.check_on,30):""}</button>`;
-}
-function timeline(list){
-  const st=list.filter(x=>x.start_on);if(st.length<2)return"";
-  const a=st.map(x=>x.start_on).sort()[0],b=today(),span=Math.max(1,daysBetween(a,b));
-  return `<div class="tl" aria-label="Когда что было">${[...st].reverse().map(x=>{const l=daysBetween(a,x.start_on)/span*100,w=Math.max(1.5,daysBetween(x.start_on,x.end_on||b)/span*100);
-    return `<div class="t" title="${esc(x.name)}: ${fmt(x.start_on)} — ${x.end_on?fmt(x.end_on):"сейчас"}"><i class="${x.end_on?"":"now"}" style="left:${l}%;width:${Math.min(w,100-l)}%"></i><span>${esc(x.name)}</span></div>`}).join("")}
-    <span class="meta">${fmt(a)} — сегодня</span></div>`;
-}
-function periodModal(x,type){
-  const e=x||{type,name:"",reason:"",start_on:today(),end_on:"",check_on:"",note:""};
-  const prev=x?null:mine(S.periods).find(p=>p.type===type&&!p.end_on);
-  openModal(`<h2>${PTYPES[e.type].icon} ${x?esc(PTYPES[e.type].name):"Новый: "+PTYPES[e.type].name.toLowerCase()}</h2>
-    <div class="fld"><label for="pn">Название</label><input id="pn" value="${esc(e.name)}"></div>
-    <div class="fld"><label for="pr">Почему / кто назначил</label><input id="pr" value="${esc(e.reason||"")}" placeholder="${e.type==="food"?"лечебный, назначил врач":""}"></div>
-    <div class="grid3"><div class="fld"><label for="ps">С</label><input id="ps" type="date" value="${e.start_on||""}"></div>
-      <div class="fld"><label for="pe">По</label><input id="pe" type="date" value="${e.end_on||""}"></div>
-      <div class="fld"><label for="pc">Проверить до</label><input id="pc" type="date" value="${e.check_on||""}"></div></div>
-    <div class="fld"><label for="po">Заметка</label><textarea id="po">${esc(e.note||"")}</textarea></div>
-    <div class="mact">${x?`<button class="btn danger left" id="pdel">Удалить</button>`:""}<button class="btn" data-close>Отмена</button><button class="btn pri" id="psave">Сохранить</button></div>`,m=>{
-    m.querySelector("#pn").focus();
-    const v=id=>m.querySelector(id).value.trim()||null;
-    if(x)armDelete(m.querySelector("#pdel"),"Удалить запись?",()=>{closeModal();save(rm("p_periods",x.id),"Удалено")});
-    m.querySelector("#psave").onclick=()=>{
-      const row={name:v("#pn"),reason:v("#pr"),start_on:v("#ps"),end_on:v("#pe"),check_on:v("#pc"),note:v("#po")};
-      if(!row.name)return m.querySelector("#pn").focus();
-      if(row.end_on&&row.start_on&&row.end_on<row.start_on)return toast("«По» раньше «С»");
-      closeModal();
-      if(x)return save(upd("p_periods",x.id,row),"Сохранено");
-      const close=prev&&row.start_on?upd("p_periods",prev.id,{end_on:addDays(row.start_on,-1)<(prev.start_on||"")?prev.start_on:addDays(row.start_on,-1)}):Promise.resolve();
-      save(close.then(()=>ins("p_periods",{...row,type:e.type,pet_id:P().id})),"Сохранено");
-    };
-  });
-}
+/* ===== Что используем — use.js ===== */
+let use=null;
+const U=()=>use||(use=makeUse({esc,fmt,today,addDays,daysBetween,plural,dueBadge,mine,P,openModal,closeModal,armDelete,toast,save,ins,upd,rm,wr,sb,$,S:()=>S}));
+function renderFood(){U().render(main)}
 
 /* ===== Профиль и заметки ===== */
 function renderProfile(){
@@ -684,15 +684,17 @@ function noteModal(x){
 /* ---------- справка и настройки ---------- */
 const HELP=[
   ["Как это связано с «Задачами»","Все напоминания живут в «Задачах»: там же пуши на телефон и утренняя проверка. Задачи с пометкой питомца видны в обоих приложениях — это одна и та же задача, отметили в одном месте — отмечено и в другом. Новые задачи отсюда попадают в раздел «Питомцы»."],
-  ["Уведомления","Пуши на телефон включаются в «Задачах» (⚙ → «Уведомления»): все напоминания отсюда приходят оттуда. Новая задача отсюда появляется и в «Задачах» — в разделе «Питомцы», со значком питомца; отметили здесь — отмечено и там. Повтор, который здесь не настроить, меняется в «Задачах». Задачи, созданные из лекарств, процедур или питания, меняются там, откуда созданы."],
-  ["Загрузка из файла","⚙ → «Загрузить из файла»: файл готовит Claude — вес, приёмы у врача, корм, заметки для выбранного питомца. Что уже есть, не задваивается. «Скачать копию» — сохранить всё в файл."],
+  ["Уведомления","Пуши на телефон включаются в «Задачах» (⚙ → «Уведомления»): все напоминания отсюда приходят оттуда. Новая задача отсюда появляется и в «Задачах» — в разделе «Питомцы», со значком питомца; отметили здесь — отмечено и там. Повтор, который здесь не настроить, меняется в «Задачах». Задачи, созданные из лекарств, схем, приёмов или корма, меняются там, откуда созданы."],
+  ["Загрузка из файла","⚙ → «Загрузить из файла»: файл готовит Claude — вес, приёмы у врача, корм, заметки для выбранного питомца. Что уже есть, не задваивается. Загруженные раньше приёмы обновляются, только если ты их не меняла. «Скачать копию» — сохранить всё в файл."],
   ["Профиль","Имя, вид, порода, день рождения и заметки (что любит и не любит, важное про здоровье). День рождения попадает в «Задачи» ежегодным событием; имя — то же, что у значка питомца в «Задачах»."],
   ["Сегодня","Красная плашка — то, что пора было сделать, а не сделано. Ниже — дела на сегодня, «Скоро» на 30 дней вперёд (жёлтым — когда уже пора готовиться) и регулярный уход. Щелчок по названию — изменить."],
-  ["Лекарства","Пишешь: с какого по какое число давать (включительно), сколько за раз, сколько раз в день и раз в сколько дней. Приложение само считает дни курса, число приёмов и сколько всего таблеток или миллилитров нужно. Каждый приём — задача с напоминанием в своё время; после последнего дня она закончится сама. «Закончить сегодня» — если врач отменил раньше."],
-  ["Процедуры (схемы)","Цепочка шагов, например: от блох → через 7 дней от глистов → через 10 дней прививка (интервалы — как скажет врач). Начинаешь круг — каждому шагу появляется задача. Отметила шаг позже или раньше — сроки следующих сдвигаются сами. После последнего шага новый круг ставится сам через заданное число месяцев. Напоминание приходит за N дней. Изменения схемы касаются новых кругов."],
-  ["Ветклиника","Дневник приёмов по датам: зачем пришли, что сделали по факту, что назначили. «Следующий приём» сразу становится задачей с напоминанием за неделю."],
-  ["Вес","Записываешь вес (можно в граммах: 4520). Зелёная полоса на графике — обычная зона, пунктир — обычный вес. Красная точка — вне зоны или скачок больше порога меньше чем за полтора месяца. Первый год (от дня рождения) — рост: серые точки без предупреждений. Если в «Задачах» есть задача «Взвесить…», она отметится сама."],
-  ["Питание","Корм, наполнитель и другое — периодами «с … по …». «По» пусто — значит сейчас. Начинаешь новый корм — прежний закрывается днём раньше. «Проверить до» — для назначенного на срок: за неделю придёт задача спросить врача."],
+  ["Снять отметку","Отметила по ошибке: сегодняшнее — нажми ✓ ещё раз у зачёркнутой строки; задачу из лекарства, приёма или схемы — щёлкни по названию → «Снять последнюю отметку»; сделанный шаг схемы — щёлкни по нему → «Снять отметку»."],
+  ["Задача «Записаться»","За 30 дней до следующего приёма или до прививки в «Задачах» появляется «Записаться: …» и висит, пока не отметишь. На сам день — своя задача. Сколько дней — поле «Записаться за, дней» у приёма и у схемы; пусто — не нужна. Если до срока уже меньше, задача не создаётся."],
+  ["Ветклиника","Дневник приёмов по годам: зачем пришли, что сделали по факту, что назначили. Щелчок по строке — открыть. «Следующий приём» сразу становится задачей; «через полгода» и другие кнопки считают от даты приёма. В скобках после лекарства — от чего его обычно применяют, это не диагноз."],
+  ["Прививки","Все прививки по датам. Это те же приёмы ветклиники: прививка записана в приёме, поэтому ничего не задваивается. Ниже — схема подготовки: цепочка шагов, например: от блох → через 5 дней от глистов → через 10 дней прививка (интервалы — как скажет врач). «Начать» — каждому шагу появляется задача. Отметила шаг позже или раньше (по кружку или названию) — сроки следующих сдвигаются сами. Сдвинула начало — сдвинутся несделанные. После последнего шага новый круг ставится сам через заданное число месяцев. Изменения схемы касаются новых кругов."],
+  ["Процедуры и лекарства","Вкладка скрыта, пока не нужна: включается в ⚙ галочкой, данные не теряются. Идёт курс лекарства — она видна сама. Лекарство: с какого числа и на сколько дней (или по какое число включительно), сколько за раз, сколько раз в день и раз в сколько дней. Приложение само считает дни, приёмы и сколько всего нужно. Каждый приём — задача с напоминанием в своё время; после последнего дня она закончится сама. «Закончить сегодня» — если врач отменил раньше. «Дано» считается по отметкам за последние 90 дней. Там же — другие схемы процедур, они работают как схема прививки."],
+  ["Вес","Записываешь вес (можно в граммах: 4520). Зелёная полоса на графике — обычная зона, пунктир — обычный вес; зона и порог скачка меняются в профиле. Красная точка — вне зоны или скачок больше порога меньше чем за полтора месяца. Первый год (от дня рождения) — рост: серые точки без предупреждений. Резкий скачок или дату в будущем приложение переспросит до записи. Если в «Задачах» есть задача «Взвесить…», она отметится сама."],
+  ["Что используем","Корм, наполнитель и свои блоки («＋ Создать блок», ✎ — переименовать или удалить пустой). У записи — картинка, бренд, даты «с … по …» («по» пусто — значит сейчас), когда куплено, заметка. Перенести в другой блок — поле «Блок». Новый корм или наполнитель закрывает прежний днём раньше; в своих блоках несколько средств живут рядом. «Проверить до» — у корма, назначенного на срок: за неделю придёт задача спросить врача. Корм закончили или сменили раньше — несделанная задача сама уйдёт из «Задач», об этом предупредит строка в окне."],
   ["Версия","Номер версии — внизу этой справки (дата и время выкладки). Если приложение давно открыто, а на сайте вышла новая версия, вверху появится «Есть новая версия» — нажми «Обновить»."],
 ];
 function openHelp(){openModal(`<h2>Справка</h2><div class="help">${HELP.map(([t,x])=>`<details><summary>${t}</summary><p>${x}</p></details>`).join("")}</div>
@@ -701,42 +703,68 @@ function openGear(){openModal(`<h2>Настройки</h2>
   <p class="meta" style="margin:0">${esc(user.email||"")}</p>
   <div class="btns"><button class="btn" id="imp">📁 Загрузить из файла</button><button class="btn" id="exp">💾 Скачать копию</button></div>
   <input type="file" id="impf" accept=".json,application/json" hidden>
+  ${P()?`<label class="optl"><input type="checkbox" id="shp"${P().show_proc?" checked":""}> Процедуры и лекарства</label>`:""}
   <div class="mact"><button class="btn left danger" id="out">Выйти</button><button class="btn" data-close>Закрыть</button></div>`,m=>{
   m.querySelector("#out").onclick=()=>{closeModal();sb.auth.signOut()};
   m.querySelector("#exp").onclick=exportFile;
+  const shp=m.querySelector("#shp");if(shp)shp.onchange=()=>save(upd("p_pets",P().id,{show_proc:shp.checked}),shp.checked?"Вкладка в «Здоровье» включена":"Вкладка скрыта");
   const f=m.querySelector("#impf");
   m.querySelector("#imp").onclick=()=>{if(!P())return toast("Сначала создай профиль");f.click()};
   f.onchange=async()=>{const file=f.files[0];if(!file)return;
     try{const d=JSON.parse(await file.text());closeModal();await importData(d)}catch(e){toast("Не удалось прочитать файл: "+e.message)}};
 })}
-// загрузка из файла: {weights:[{day,kg,note}], visits:[{day,clinic,reason,done,prescribed,note}], periods:[{type,name,reason,start_on,end_on,note}], notes:[{title,body}]}
+/* загрузка из файла: {weights:[{day,kg,note}], visits:[{day,clinic,reason,done,prescribed,note,vax_complex,vax_rabies,was}], periods:[{type,block,name,brand,…}], notes:[{title,body}]}
+   Уже загруженный приём обновляется, только если поле сейчас такое же, как в was (Юля его не меняла); прививки — только в пустые поля. */
 async function importData(d){
-  const p=P(),key=(...a)=>a.map(x=>String(x??"").trim().toLowerCase()).join("|");
-  const have={w:new Set(mine(S.weights).map(x=>key(x.day,(+x.kg).toFixed(3)))),v:new Set(mine(S.visits).map(x=>key(x.day,x.reason))),
+  if(!await load())return;   // сверяем со свежим: на экране могло быть старое (правила с телефона)
+  const p=P(),key=(...a)=>a.map(x=>String(x??"").trim().toLowerCase()).join("|"),same=(a,b)=>String(a??"").replace(/\r/g,"").trim()===String(b??"").replace(/\r/g,"").trim();
+  const have={w:new Set(mine(S.weights).map(x=>key(x.day,(+x.kg).toFixed(3)))),
     p:new Set(mine(S.periods).map(x=>key(x.type,x.name,x.start_on))),n:new Set(mine(S.notes).map(x=>key(x.title)))};
   const isDay=s=>/^\d{4}-\d{2}-\d{2}$/.test(s||"");
   const W=(d.weights||[]).filter(x=>isDay(x.day)&&num(x.kg)>0).map(x=>({pet_id:p.id,day:x.day,kg:num(x.kg)>100?num(x.kg)/1000:num(x.kg),note:x.note||null})).filter(x=>!have.w.has(key(x.day,x.kg.toFixed(3))));
-  // следующий приём ставим, только если он ещё впереди (иначе получится старая задача)
-  const V=(d.visits||[]).filter(x=>isDay(x.day)).map(x=>({pet_id:p.id,day:x.day,clinic:x.clinic||null,reason:x.reason||null,done:x.done||null,prescribed:x.prescribed||null,note:x.note||null,
-    next_on:isDay(x.next_on)&&x.next_on>=today()?x.next_on:null,next_why:x.next_why||null})).filter(x=>!have.v.has(key(x.day,x.reason)));
-  const PR=(d.periods||[]).filter(x=>x.name&&PTYPES[x.type||"food"]).map(x=>({pet_id:p.id,type:x.type||"food",name:x.name,reason:x.reason||null,start_on:isDay(x.start_on)?x.start_on:null,end_on:isDay(x.end_on)?x.end_on:null,
-    check_on:isDay(x.check_on)&&x.check_on>=today()?x.check_on:null,note:x.note||null})).filter(x=>!have.p.has(key(x.type,x.name,x.start_on)));
+  const fv=(d.visits||[]).filter(x=>isDay(x.day)),V=[],VU=[];let kept=0;
+  for(const x of fv){
+    // тот же приём: день и причина; причину могли переписать — тогда единственный приём этого дня
+    const onDay=mine(S.visits).filter(v=>v.day===x.day);
+    const e=onDay.find(v=>key(v.reason)===key(x.reason))||(onDay.length===1&&fv.filter(y=>y.day===x.day).length===1?onDay[0]:null);
+    if(!e){
+      // следующий приём ставим, только если он ещё впереди (иначе получится старая задача)
+      V.push({pet_id:p.id,day:x.day,clinic:x.clinic||null,reason:x.reason||null,done:x.done||null,prescribed:x.prescribed||null,note:x.note||null,vax_complex:x.vax_complex||null,vax_rabies:x.vax_rabies||null,
+        next_on:isDay(x.next_on)&&x.next_on>=today()?x.next_on:null,next_why:x.next_why||null,prep_days:x.prep_days??30});
+      continue;
+    }
+    const patch={};let touched=false;
+    for(const f of ["clinic","reason","done","prescribed","note"])if(x.was&&f in x.was&&!same(e[f],x[f])){if(same(e[f],x.was[f]))patch[f]=x[f]||null;else touched=true}
+    for(const f of ["vax_complex","vax_rabies"])if(x[f]&&!e[f])patch[f]=x[f];
+    if(touched)kept++;
+    if(Object.keys(patch).length)VU.push([e.id,patch]);
+  }
+  const PR=(d.periods||[]).filter(x=>x.name&&PTYPES.includes(x.type||"food")).map(x=>({row:{pet_id:p.id,type:x.type||"food",name:x.name,brand:x.brand||null,bought_on:isDay(x.bought_on)?x.bought_on:null,reason:x.reason||null,start_on:isDay(x.start_on)?x.start_on:null,end_on:isDay(x.end_on)?x.end_on:null,
+    check_on:isDay(x.check_on)&&x.check_on>=today()?x.check_on:null,note:x.note||null},block:x.block})).filter(x=>!have.p.has(key(x.row.type,x.row.name,x.row.start_on)));
   const N=(d.notes||[]).filter(x=>x.title).map(x=>({pet_id:p.id,title:x.title,body:x.body||null,pinned:!!x.pinned})).filter(x=>!have.n.has(key(x.title)));
   const bday=!p.birthday&&isDay(d.pet?.birthday)?d.pet.birthday:null;
   const total=W.length+V.length+PR.length+N.length+(bday?1:0);
-  if(!total)return toast("Новых записей в файле нет — всё уже загружено");
-  if(!confirm(`Загрузить для «${p.name}»: взвешиваний ${W.length}, приёмов ${V.length}, корм/быт ${PR.length}, заметок ${N.length}${bday?", день рождения "+fmt(bday):""}?`))return;
+  const left=kept?`, не тронуто (менялись у тебя): ${kept}`:"";
+  if(!total&&!VU.length)return toast("Новых записей в файле нет — всё уже загружено"+left,6000);
+  if(!confirm(`Загрузить для «${p.name}»: взвешиваний ${W.length}, приёмов ${V.length}, корм и средства ${PR.length}, заметок ${N.length}${bday?", день рождения "+fmt(bday):""}${VU.length?"; обновить приёмов "+VU.length:""}${left}?`))return;
   const put=(t,rows)=>rows.length?wr(sb.from(t).insert(rows)):null;
-  await save(Promise.all([put("p_weights",W),put("p_visits",V),put("p_periods",PR),put("p_notes",N),bday?upd("p_pets",p.id,{birthday:bday}):null]),"Загружено: "+total);
+  await save((async()=>{
+    const ids=new Map();
+    for(const b of new Set(PR.filter(x=>x.row.type==="other"&&x.block).map(x=>x.block)))ids.set(b,await U().blockId(b));
+    // ряды с одинаковым набором полей — иначе база ругается
+    const rows=PR.map(x=>({...x.row,block_id:ids.get(x.block)||null}));
+    await Promise.all([put("p_weights",W),put("p_visits",V),put("p_periods",rows),put("p_notes",N),bday?upd("p_pets",p.id,{birthday:bday}):null,...VU.map(([id,r])=>upd("p_visits",id,r))]);
+    toast(`Загружено: ${total}, обновлено приёмов: ${VU.length}${left}`,6000);
+  })());
 }
 function exportFile(){
   const p=P();if(!p)return;
   const pick=(rows,f)=>mine(rows).map(x=>Object.fromEntries(f.map(k=>[k,x[k]])));
   const d={pet:{name:p.name,kind:p.kind,birthday:p.birthday,sex:p.sex,breed:p.breed,color:p.color,chip:p.chip,notes:p.notes},
-    weights:pick(S.weights,["day","kg","note"]),visits:pick(S.visits,["day","clinic","reason","done","prescribed","next_on","next_why","note"]),
-    periods:pick(S.periods,["type","name","reason","start_on","end_on","check_on","note"]),notes:pick(S.notes,["title","body","pinned"]),
+    weights:pick(S.weights,["day","kg","note"]),visits:pick(S.visits,["day","clinic","reason","done","prescribed","next_on","next_why","prep_days","vax_complex","vax_rabies","note"]),
+    periods:mine(S.periods).map(x=>({...Object.fromEntries(["type","name","brand","reason","start_on","end_on","check_on","bought_on","note"].map(k=>[k,x[k]])),block:U().blockOf(x)?.name||null})),notes:pick(S.notes,["title","body","pinned"]),
     meds:pick(S.meds,["name","unit","amount","times","every_days","start_on","end_on","stopped_on","reason","note"]),
-    schemes:pick(S.schemes,["name","steps","repeat_months","remind_days"])};
+    schemes:pick(S.schemes,["name","steps","repeat_months","remind_days","prep_days"])};
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([JSON.stringify(d,null,1)],{type:"application/json"}));
   a.download=`питомцы-${p.name}-${today()}.json`;
@@ -769,15 +797,18 @@ function escClose(e){
   closeModal();
 }
 function closeModal(){$("#modalRoot").innerHTML="";document.removeEventListener("keydown",escClose)}
-function armDelete(btn,text,fn){btn.onclick=()=>{if(btn.dataset.armed){fn();return}btn.dataset.armed="1";btn.textContent=text;btn.classList.add("pri")}}
+// второе нажатие — не раньше 0,8 с: двойной щелчок по «Удалить» удалял сразу
+function armDelete(btn,text,fn){btn.onclick=()=>{if(btn.dataset.armed){if(Date.now()-btn.dataset.armed>800)fn();return}btn.dataset.armed=Date.now();btn.textContent=text;btn.classList.add("armed")}}
 let tt=null;
-function toast(msg){let el=$(".toast");if(!el){el=document.createElement("div");el.className="toast";el.setAttribute("role","status");document.body.appendChild(el)}el.textContent=msg;clearTimeout(tt);tt=setTimeout(()=>el.remove(),/^Не удалось/.test(msg)?7000:2600)}
+function toast(msg,ms){let el=$(".toast");if(!el){el=document.createElement("div");el.className="toast";el.setAttribute("role","status");document.body.appendChild(el)}el.textContent=msg;clearTimeout(tt);tt=setTimeout(()=>el.remove(),ms||(/^Не удалось/.test(msg)?7000:2600))}
 
 /* ---------- щелчки ---------- */
 const byId=(list,id)=>list.find(x=>x.id===id);
 document.addEventListener("click",e=>{
-  const b=e.target.closest("button,[data-task]");if(!b||!S)return;
+  const b=e.target.closest("button,[data-task],[data-step]");if(!b)return;
   const d=b.dataset;
+  if(d.act==="retry"){if(!b.disabled){b.disabled=true;b.textContent="Пробую…";setTimeout(load,600)}return}
+  if(!S)return;
   if(d.tab){tab=d.tab;ls.set("tab",tab);render();scrollTo(0,0);return}
   if(d.pet){petId=d.pet;ls.set("pet",petId);render();return}
   if(d.wrange){wRange=d.wrange;ls.set("wrange",wRange);render();return}
@@ -791,20 +822,24 @@ document.addEventListener("click",e=>{
   if(d.task){const t=byId(S.tasks,d.task);if(t)taskModal(t);return}
   if(d.step)return stepClick(d.step);
   if(d.scheme)return schemeModal(byId(S.schemes,d.scheme));
-  if(d.runnew){const sc=byId(S.schemes,d.runnew);return dateAsk("Начать: "+esc(sc.name),today(),day=>save(ins("p_runs",{pet_id:P().id,scheme_id:sc.id,name:sc.name,start_on:day}),"Круг начат — шаги в «Задачах»"),`<p class="meta" style="margin:0">Дата первого шага.</p>`)}
-  if(d.runmove){const r=byId(S.runs,d.runmove);return dateAsk("Начало круга",r.start_on,day=>save(upd("p_runs",r.id,{start_on:day}),"Сроки пересчитаны"),`<p class="meta" style="margin:0">Несделанные шаги сдвинутся.</p>`)}
+  if(d.runnew){const sc=byId(S.schemes,d.runnew);return dateAsk("Начать: "+esc(sc.name),today(),day=>save(ins("p_runs",{pet_id:P().id,scheme_id:sc.id,name:sc.name,start_on:day}),"Круг начат — шаги в «Задачах»"),"Дата первого шага")}
+  if(d.runmove){const r=byId(S.runs,d.runmove);return dateAsk("Начало круга",r.start_on,day=>save(upd("p_runs",r.id,{start_on:day}),"Сроки пересчитаны"),"Дата первого шага")}
   if(d.rundel){const r=byId(S.runs,d.rundel);if(confirm("Убрать этот круг? Несделанные задачи удалятся."))save(rm("p_runs",r.id),"Убрано");return}
   if(d.med)return medModal(byId(S.meds,d.med));
   if(d.medstop){const x=byId(S.meds,d.medstop);if(confirm("Закончить курс «"+x.name+"» сегодня?"))save(upd("p_meds",x.id,{stopped_on:today()<x.start_on?x.start_on:today()}),"Курс закончен");return}
   if(d.visit)return visitModal(byId(S.visits,d.visit));
   if(d.weight)return weightModal(byId(S.weights,d.weight));
-  if(d.period){const x=byId(S.periods,d.period);return periodModal(x,x.type)}
-  if(d.newperiod)return periodModal(null,d.newperiod);
+  if(d.period){const x=byId(S.periods,d.period);return U().periodModal(x,x.type)}
+  if(d.newperiod)return U().periodModal(null,d.newperiod,d.blk);
+  if(d.block)return U().blockModal(byId(S.blocks,d.block));
   if(d.note)return noteModal(byId(S.notes,d.note));
   if(d.newpet){const k=d.newpet,name=prompt("Как зовут?",user.user_metadata?.pets?.[k]||"");if(name&&name.trim())createPet(k,name.trim());return}
   switch(d.act){
     case"newtask":return taskModal(null);
     case"newscheme":return schemeModal(null);
+    case"newvaxscheme":return schemeModal(null,true);
+    case"newvax":return visitModal(null,{reason:"Прививка"});
+    case"newblock":return U().blockModal(null);
     case"newmed":return medModal(null);
     case"newvisit":return visitModal(null);
     case"newweight":return weightModal(null);
